@@ -39,6 +39,7 @@ enum RunModes {
     RUNMODE_TILERA_MPIPE,
     RUNMODE_UNITTEST,
     RUNMODE_NAPATECH,
+    RUNMODE_ANIC,
     RUNMODE_UNIX_SOCKET,
     RUNMODE_WINDIVERT,
     RUNMODE_USER_MAX, /* Last standard running mode */

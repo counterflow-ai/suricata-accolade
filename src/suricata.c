@@ -650,6 +650,9 @@ static void PrintUsage(const char *progname)
 #ifdef HAVE_NAPATECH
     printf("\t--napatech                           : run Napatech Streams using the API\n");
 #endif
+#ifdef HAVE_ACCOLADE
+    printf("\t--anic                               : process packets from Accolade NIC (ANIC)\n");
+#endif
 #ifdef BUILD_UNIX_SOCKET
     printf("\t--unix-socket[=<file>]               : use unix socket to control suricata work\n");
 #endif
@@ -1789,7 +1792,16 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
             SCLogError(SC_ERR_NAPATECH_REQUIRED, "libntapi and a Napatech adapter are required"
                                                  " to capture packets using --napatech.");
             return TM_ECODE_FAILED;
-#endif /* HAVE_NAPATECH */
+#endif /* HAVE_ACCOLADE */
+			}
+        else if (strcmp((long_opts[option_index]).name, "anic") == 0) {
+#ifdef HAVE_ACCOLADE
+            suri->run_mode = RUNMODE_ANIC;
+#else
+            SCLogError(SC_ERR_NAPATECH_REQUIRED, "libanic and Accolade NIC are required"
+                                                 " to capture packets using --anic.");
+            return TM_ECODE_FAILED;
+#endif /* HAVE_ACCOLADE */
 			}
             else if(strcmp((long_opts[option_index]).name, "pcap-buffer-size") == 0) {
 #ifdef HAVE_PCAP_SET_BUFF

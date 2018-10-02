@@ -65,6 +65,7 @@ enum PktSrcEnum {
 #include "source-mpipe.h"
 #include "source-netmap.h"
 #include "source-windivert.h"
+#include "source-anic.h"
 #ifdef HAVE_PF_RING_FLOW_OFFLOAD
 #include "source-pfring.h"
 #endif
@@ -469,6 +470,9 @@ typedef struct Packet_
 #endif
 #ifdef HAVE_NETMAP
         NetmapPacketVars netmap_v;
+#endif
+#ifdef HAVE_ACCOLADE
+        AccoladePacketVars anic_v;
 #endif
 #ifdef HAVE_PFRING
 #ifdef HAVE_PF_RING_FLOW_OFFLOAD
