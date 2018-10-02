@@ -5,7 +5,7 @@ Introduction
 ------------
 
 Suricata is a network IDS, IPS and NSM engine.
-
+(Modified to support Accolade NIC)
 
 Installation
 ------------
