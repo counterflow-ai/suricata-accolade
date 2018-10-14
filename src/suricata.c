@@ -710,6 +710,9 @@ static void PrintBuildInfo(void)
 #ifdef HAVE_AF_PACKET
     strlcat(features, "AF_PACKET ", sizeof(features));
 #endif
+#ifdef HAVE_ACCOLADE
+    strlcat(features, "ACCOLADE ", sizeof(features));
+#endif
 #ifdef HAVE_NETMAP
     strlcat(features, "NETMAP ", sizeof(features));
 #endif
