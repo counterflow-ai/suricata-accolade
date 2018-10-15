@@ -41,8 +41,8 @@
 
 TmEcode NoAccoladeSupportExit(ThreadVars *, const void *, void **);
 
-void TmModuleAccoladeRegister(void) {
-    tmm_modules[TMM_RECEIVEACCOLADE].name = "Accolade";
+void TmModuleAccoladeReceiveRegister(void) {
+    tmm_modules[TMM_RECEIVEACCOLADE].name = "AccoladeReceive";
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadInit = NoAccoladeSupportExit;
     tmm_modules[TMM_RECEIVEACCOLADE].Func = NULL;
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadExitPrintStats = NULL;
@@ -96,9 +96,9 @@ TmEcode AccoladeDecode(ThreadVars *, Packet *, void *, PacketQueue *, PacketQueu
 /**
  * \brief Register the Accolade  receiver (reader) module.
  */
-void TmModuleAccoladeRegister(void)
+void TmModuleAccoladeReceiveRegister(void)
 {
-    tmm_modules[TMM_RECEIVEACCOLADE].name = "Accolade";
+    tmm_modules[TMM_RECEIVEACCOLADE].name = "AccoladeReceive";
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadInit = AccoladeThreadInit;
     tmm_modules[TMM_RECEIVEACCOLADE].Func = NULL;
     tmm_modules[TMM_RECEIVEACCOLADE].PktAcqLoop = AccoladePacketLoopZC;
@@ -166,7 +166,6 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     atv->anic_context = anic_context;
     atv->tv = tv;
     atv->thread_id = SC_ATOMIC_ADD(g_thread_count, 1);
-    //atv->thread_id = g_thread_count;
     atv->ring_mask = anic_ring_mask (atv->anic_context, atv->thread_id);
 
     struct rx_rmon_counts_s stats;

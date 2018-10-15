@@ -1778,6 +1778,36 @@
         fi
     fi
 
+  # Accolade - Using the ANIC API
+    AC_ARG_ENABLE(accolade,
+                AS_HELP_STRING([--enable-accolade],[Enable Accolade network interface card]),
+                [ enable_accolade=yes ],
+                [ enable_accolade=no])
+    AC_ARG_WITH(accolade_include,
+                [  --with-accolade-include=DIR   accolade include directory],
+                [with_accolade_include="$withval"],[with_accolade_include="/opt/accolade/include"])
+    AC_ARG_WITH(accolade_library,
+                [  --with-accolade-library=DIR  accolade library directory],
+                [with_accolade_library="$withval"],[with_accolade_library="/opt/accolade/lib"])
+
+    if test "$enable_accolade" = "yes"; then
+        CPPFLAGS="${CPPFLAGS} -I${with_accolade_include}"
+        LDFLAGS="${LDFLAGS} -L${with_accolade_library} -lanic"
+        AC_CHECK_HEADER(anic_api.h,ACCOLADE="yes",ACCOLADE="no")
+        if test "$ACCOLADE" != "no"; then
+            ACCOLADE=""
+            AC_CHECK_LIB(anic, anic_open,ACCOLADE="yes",ACCOLADE="no")
+        fi
+
+        if test "$ACCOLADE" = "no"; then
+            echo " ----------------------------------------"
+            echo "  ERROR! libanic library not found"
+            echo " ----------------------------------------"
+            exit 1
+        fi
+        AC_DEFINE([HAVE_ACCOLADE],[1],(Accolade network interface card support))
+    fi
+
   # Napatech - Using the 3GD API
     AC_ARG_ENABLE(napatech,
                 AS_HELP_STRING([--enable-napatech],[Enabled Napatech Devices]),
@@ -2379,6 +2409,7 @@ SURICATA_BUILD_CONF="Suricata Configuration:
   DAG enabled:                             ${enable_dag}
   Napatech enabled:                        ${enable_napatech}
   WinDivert enabled:                       ${enable_windivert}
+  Accolade enabled:                        ${enable_accolade}
 
   Unix socket enabled:                     ${enable_unixsocket}
   Detection enabled:                       ${enable_detection}

@@ -107,6 +107,7 @@ int RunModeNeedsBypassManager(void);
 #include "runmode-af-packet.h"
 #include "runmode-nflog.h"
 #include "runmode-unix-socket.h"
+#include "runmode-anic.h"
 #include "runmode-netmap.h"
 #include "runmode-windivert.h"
 

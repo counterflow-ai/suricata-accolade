@@ -26,6 +26,10 @@
  *
  */
 
+#include "suricata-common.h"
+
+#ifdef HAVE_ACCOLADE
+
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
@@ -40,7 +44,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef HAVE_ACCOLADE
 
 #include "util-anic.h"
 // ------------------------------------------------------------------------------

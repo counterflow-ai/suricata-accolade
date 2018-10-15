@@ -24,9 +24,9 @@
 #ifndef __SOURCE_ACCOLADE_H__
 #define __SOURCE_ACCOLADE_H__
 
-void TmModuleAccoladeRegister (void);
+void TmModuleAccoladeReceiveRegister (void);
 TmEcode AccoladeThreadDeinit(ThreadVars *tv, void *data);
-void TmModuleAccoladeRegister (void);
+void TmModuleAccoladeDecodeRegister (void);
 
 #ifdef HAVE_ACCOLADE
 
