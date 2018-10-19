@@ -26,6 +26,10 @@
  *
  */
 
+#include "suricata-common.h"
+
+#ifdef HAVE_ACCOLADE
+
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
@@ -40,7 +44,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef HAVE_ACCOLADE
 
 #include "util-anic.h"
 // ------------------------------------------------------------------------------
@@ -143,7 +146,6 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
         ctx->blocks[block].buf_p = (uint8_t *)dma_info.userVirtualAddress;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
         anic_block_add(ctx->handle, 0, block, 0, ctx->blocks[block].dma_address);
-        // printf("adding blk:%4u to freelist dataP:%12p/0x%012lx\n", block, ctx->blocks[block].buf_p, ctx->blocks[block].dma_address);
     }
 
 #else
@@ -164,6 +166,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	// Validate/process arguments
 	if (ctx->index < 0)
 	{
+		//TODO: change this to Suricata logging
 		fprintf(stderr, "%s:%u argument error: anicIndex argument must be specified\n", __FUNCTION__, __LINE__);
 		return -1;
 	}
@@ -172,6 +175,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	ctx->handle = anic_open("/dev/anic", ctx->index);
 	if (anic_error_code(ctx->handle) != ANIC_ERR_NONE)
 	{
+		//TODO: change this to Suricata logging
 		fprintf(stderr, "ERROR: could not anic_open: %s\n", anic_error_message(ctx->handle));
 		anic_close(ctx->handle);
 		return -1;
@@ -217,8 +221,8 @@ int anic_configure(ANIC_CONTEXT *ctx)
 
 		case PORT:
         	/* one thread per port */
-        	ctx->ring_count = 4;
-        	ctx->ring_mask = 0x000000000000000fL;
+        	ctx->ring_count = ctx->port_count;
+        	ctx->ring_mask |= (1L << ctx->ring_count) - 1;
         	anic_pduproc_steer(ctx->handle, ANIC_STEER0123);
         	anic_pduproc_dma_pktseq(ctx->handle, 1);
 		break;
@@ -227,17 +231,17 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		default:
         	/* load balance mode */
         	ctx->ring_count = 8;
+		//TODO:  check this
+        	ctx->ring_mask = (0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
         	anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
         	anic_pduproc_dma_pktseq(ctx->handle, 1);
-        	if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL)) {
+    		if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL)) {
             	// if large LUT is not supported, fall back to normal LUT
             	if (anic_setup_rings(ctx->handle, ctx->ring_count, 0x01, NULL)) {
                 	fprintf(stderr, "ERROR: unsupported firmware revision\n");
                 	return -1;
             	}
-        	}
-			//TODO:  check this
-        	ctx->ring_mask = ( 0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
+    		}
 		break;
     }
 	// one-to-one mapping ring to thread
@@ -251,7 +255,6 @@ int anic_configure(ANIC_CONTEXT *ctx)
 
 	anic_set_ts_disc_mode(ctx->handle, ANIC_TS_DISC_HOST);
 	anic_map_blocks(ctx, ANIC_BLOCK_MAX_BLOCKS);
-	fprintf(stderr, "ready\n");
 
 	// enable rings
 	for (int i = 0; i < ANIC_MAX_NUMBER_OF_RINGS; i++)
@@ -274,7 +277,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		anic_port_ena_disa(ctx->handle, port, 1);
 	}
 
-
+	fprintf(stderr, "ready\n");
 	return 0;
 }
 
@@ -284,7 +287,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
  *
  * ---------------------------------------------------------------------------------------
  */
-int anic_enable_ports (ANIC_CONTEXT *ctx)
+void anic_enable_ports (ANIC_CONTEXT *ctx)
 {
  	anic_port_ena_disa(ctx->handle, 0, 1);
   	anic_port_ena_disa(ctx->handle, 1, 1);

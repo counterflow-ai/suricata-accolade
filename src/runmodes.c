@@ -133,6 +133,8 @@ static const char *RunModeTranslateModeToName(int runmode)
             return "ERF_DAG";
         case RUNMODE_NAPATECH:
             return "NAPATECH";
+        case RUNMODE_ANIC:
+            return "ANIC";
         case RUNMODE_UNITTEST:
             return "UNITTEST";
         case RUNMODE_TILERA_MPIPE:
@@ -221,6 +223,7 @@ void RunModeRegisterRunModes(void)
     RunModeErfFileRegister();
     RunModeErfDagRegister();
     RunModeNapatechRegister();
+    RunModeAccoladeRegister();
     RunModeIdsAFPRegister();
     RunModeIdsNetmapRegister();
     RunModeIdsNflogRegister();
@@ -322,6 +325,9 @@ void RunModeDispatch(int runmode, const char *custom_mode)
                 break;
             case RUNMODE_NAPATECH:
                 custom_mode = RunModeNapatechGetDefaultMode();
+                break;
+            case RUNMODE_ANIC:
+                custom_mode = RunModeAccoladeGetDefaultMode();
                 break;
             case RUNMODE_AFP_DEV:
                 custom_mode = RunModeAFPGetDefaultMode();

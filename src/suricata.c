@@ -903,6 +903,9 @@ void RegisterAllModules(void)
     /* netmap */
     TmModuleReceiveNetmapRegister();
     TmModuleDecodeNetmapRegister();
+    /* anic */
+    TmModuleAccoladeReceiveRegister();
+    TmModuleAccoladeDecodeRegister();
     /* pfring */
     TmModuleReceivePfringRegister();
     TmModuleDecodePfringRegister();
@@ -1545,6 +1548,9 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
         {"erf-in", required_argument, 0, 0},
         {"dag", required_argument, 0, 0},
         {"napatech", 0, 0, 0},
+#ifdef HAVE_ACCOLADE
+        {"anic", 0, 0, 0},
+#endif
         {"build-info", 0, &build_info, 1},
 #ifdef HAVE_MPIPE
         {"mpipe", optional_argument, 0, 0},

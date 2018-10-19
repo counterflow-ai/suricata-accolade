@@ -59,26 +59,32 @@ static void *ParseAccoladeConfig(const char *mode)
         SCLogError(SC_ERR_MEM_ALLOC, "Failed to allocate memory for Accolade device context.");
         return NULL;
     }
-	memset(anic_context, 0, sizeof(ANIC_CONTEXT));
+    memset(anic_context, 0, sizeof(ANIC_CONTEXT));
 
-    if (mode[0]=='r' && mode[1]=='i' &&mode[2]=='n' && mode[3]=='g') {
+    if (mode[0]=='r' && mode[1]=='i' && mode[2]=='n' && mode[3]=='g') {
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
-    } else if (mode[0]=='p' && mode[1]=='o' &&mode[2]=='r' && mode[3]=='t') {
+        anic_context->thread_count = 1;
+    } else if (mode[0]=='p' && mode[1]=='o' && mode[2]=='r' && mode[3]=='t') {
         /* one thread per port */
         anic_context->ring_mode = PORT;
-    } else {
+        anic_context->thread_count = 4;
+    } else if (mode[0]=='l' && mode[1]=='o' && mode[2]=='a' && mode[3]=='d') {
         /* load balance mode */
         anic_context->ring_mode = LOADBALANCE;
-    }
-    
+        anic_context->thread_count = 8;
+    } else {
+        SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade mode");
+        exit(EXIT_FAILURE);
+    } 
+
     anic_context->reset = 1;
     if (ConfGetInt("accolade.nic", &anic_context->index) != 0){
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade NIC index");
         exit(EXIT_FAILURE);
     }
     
-	if (anic_configure(anic_context) < 0) {
+    if (anic_configure(anic_context) < 0) {
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Failed to initialize Accolade NIC");
         exit(EXIT_FAILURE);
     }
@@ -94,6 +100,7 @@ const char *RunModeAccoladeGetDefaultMode(void)
 
 void RunModeAccoladeRegister(void)
 {
+#ifdef HAVE_ACCOLADE
     default_mode = "autofp";
 
     RunModeRegisterNewRunMode(RUNMODE_ANIC, "autofp",
@@ -110,7 +117,7 @@ void RunModeAccoladeRegister(void)
         "Workers ANIC mode, each thread does all "
         " tasks from acquisition to logging",
         RunModeAccoladeWorkers);
-
+#endif
     return;
 }
 
@@ -127,8 +134,8 @@ int RunModeAccoladeSingle(void)
 
     ret = RunModeSetLiveCaptureSingle(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
-        "ReceiveAccolade",
-        "DecodeAccolade",
+        "AccoladeReceive",
+        "AccoladeDecode",
         thread_name_single,
         "ring16");
     if (ret != 0) {
@@ -153,8 +160,8 @@ int RunModeAccoladeAutoFp(void)
 
     ret = RunModeSetLiveCaptureAutoFp(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
-        "ReceiveAccolade",
-        "DecodeAccolade",
+        "AccoladeReceive",
+        "AccoladeDecode",
         thread_name_autofp,
         "loadbalance");
     if (ret != 0) {
@@ -179,8 +186,8 @@ int RunModeAccoladeWorkers(void)
 
     ret = RunModeSetLiveCaptureWorkers(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
-        "ReceiveAccolade",
-        "DecodeAccolade",
+        "AccoladeReceive",
+        "AccoladeDecode",
         thread_name_workers,
         "port");
     if (ret != 0) {

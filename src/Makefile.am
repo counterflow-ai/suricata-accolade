@@ -352,6 +352,7 @@ runmode-af-packet.c runmode-af-packet.h \
 runmode-erf-dag.c runmode-erf-dag.h \
 runmode-erf-file.c runmode-erf-file.h \
 runmode-ipfw.c runmode-ipfw.h \
+runmode-anic.c runmode-anic.h \
 runmode-napatech.c runmode-napatech.h \
 runmode-netmap.c runmode-netmap.h \
 runmode-nfq.c runmode-nfq.h \
@@ -370,6 +371,7 @@ source-erf-dag.c source-erf-dag.h \
 source-erf-file.c source-erf-file.h \
 source-ipfw.c source-ipfw.h \
 source-mpipe.c source-mpipe.h \
+source-anic.c source-anic.h \
 source-napatech.c source-napatech.h \
 source-netmap.c source-netmap.h \
 source-nfq.c source-nfq.h \
@@ -465,6 +467,7 @@ util-mpm-ac-tile.c util-mpm-ac-tile.h \
 util-mpm-ac-tile-small.c \
 util-mpm-hs.c util-mpm-hs.h \
 util-mpm.c util-mpm.h \
+util-anic.c util-anic.h \
 util-napatech.c util-napatech.h \
 util-optimize.h \
 util-pages.c util-pages.h \

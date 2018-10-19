@@ -36,13 +36,16 @@
 #include "tmqh-packetpool.h"
 #include "source-anic.h"
 
+#include <sys/types.h>
+#include <machine/atomic.h>
+
 #ifndef HAVE_ACCOLADE
 
 
 TmEcode NoAccoladeSupportExit(ThreadVars *, const void *, void **);
 
-void TmModuleAccoladeRegister(void) {
-    tmm_modules[TMM_RECEIVEACCOLADE].name = "Accolade";
+void TmModuleAccoladeReceiveRegister(void) {
+    tmm_modules[TMM_RECEIVEACCOLADE].name = "AccoladeReceive";
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadInit = NoAccoladeSupportExit;
     tmm_modules[TMM_RECEIVEACCOLADE].Func = NULL;
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadExitPrintStats = NULL;
@@ -79,7 +82,7 @@ SC_ATOMIC_DECLARE(uint64_t, g_thread_count);
 typedef struct AccoladeThreadVars_ {
     ANIC_CONTEXT *anic_context;
     uint64_t ring_mask;
-    uint32_t thread_id;
+    int32_t thread_id;
     uint32_t pad;
     ThreadVars *tv;
     TmSlot *slot;
@@ -96,9 +99,9 @@ TmEcode AccoladeDecode(ThreadVars *, Packet *, void *, PacketQueue *, PacketQueu
 /**
  * \brief Register the Accolade  receiver (reader) module.
  */
-void TmModuleAccoladeRegister(void)
+void TmModuleAccoladeReceiveRegister(void)
 {
-    tmm_modules[TMM_RECEIVEACCOLADE].name = "Accolade";
+    tmm_modules[TMM_RECEIVEACCOLADE].name = "AccoladeReceive";
     tmm_modules[TMM_RECEIVEACCOLADE].ThreadInit = AccoladeThreadInit;
     tmm_modules[TMM_RECEIVEACCOLADE].Func = NULL;
     tmm_modules[TMM_RECEIVEACCOLADE].PktAcqLoop = AccoladePacketLoopZC;
@@ -165,9 +168,12 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
-    atv->thread_id = SC_ATOMIC_ADD(g_thread_count, 1);
-    //atv->thread_id = g_thread_count;
+    atv->thread_id = SC_ATOMIC_GET(g_thread_count);
+
+
+    SC_ATOMIC_ADD(g_thread_count, 1);
     atv->ring_mask = anic_ring_mask (atv->anic_context, atv->thread_id);
+
 
     struct rx_rmon_counts_s stats;
     if (atv->thread_id < anic_context->port_count)
@@ -176,7 +182,7 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
         anic_get_rx_rmon_counts (anic_context->handle, atv->thread_id, 1,  &stats);
         anic_port_ena_disa(anic_context->handle, atv->thread_id, 1);
     }
-    SCLogDebug("Started processing packets for ACCOLADE thread: %lu", atv->thread_id);
+    SCLogInfo("Started processing packets for ACCOLADE thread: %u", atv->thread_id);
 
     *data = (void *) atv;
     SCReturnInt(TM_ECODE_OK);
@@ -189,11 +195,12 @@ static void AccoladeReleasePacket(struct Packet_ *p)
 {
     PacketFreeOrRelease(p);
     ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
-    if ((--anic_ctx->block_status[p->anic_v.block_id].refcount)==0)
+    atomic_subtract_64 (&anic_ctx->block_status[p->anic_v.block_id].refcount, 1);
+    if (anic_ctx->block_status[p->anic_v.block_id].refcount==0)
     {
         anic_block_add(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.block_id, 0, anic_ctx->blocks[p->anic_v.block_id].dma_address);
+fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
     }
-;
 }
 
 // ------------------------------------------------------------------------------
@@ -203,11 +210,6 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 {
     ANIC_CONTEXT *anic_ctx = atv->anic_context;
     const struct anic_blkstatus_s *blkstatus_p = &anic_ctx->block_status[block_id].blkStatus;
- 
-    uint32_t thread_id = atv->thread_id;
-    uint32_t ring_id = blkstatus_p->ringid;
-
-    uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
     uint8_t *packet;
     uint32_t packets = 0;
@@ -215,10 +217,14 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     uint32_t packet_errors = 0;
     uint32_t timestamp_errors = 0;
     uint32_t validation_errors = 0;
+    uint32_t thread_id = atv->thread_id;
+    uint32_t ring_id = blkstatus_p->ringid;
     struct anic_descriptor_rx_packet_data *descriptor;
+    uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
-    anic_ctx->block_status[block_id].refcount = blkstatus_p->pktcnt;
-    while (buffer <= &blkstatus_p->buf_p[blkstatus_p->lastpkt_offset]) {
+    atomic_set_64 (&anic_ctx->block_status[block_id].refcount, blkstatus_p->pktcnt);
+fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
+    while (packets < blkstatus_p->pktcnt) {
         descriptor = (struct anic_descriptor_rx_packet_data *)buffer;
 
         // Packet header checks can be useful for basic application sanity but as noted below,
@@ -263,8 +269,14 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 
         packets++;
         bytes += descriptor->length;
-        if (descriptor->anyerr)
+        if (descriptor->anyerr) {
             packet_errors++;
+        }
+    }
+
+    if (blkstatus_p->pktcnt != packets) {
+	fprintf(stderr,"%s: ERROR: pktcnt != packets\n", __FUNCTION__);
+	exit (0);
     }
 
     /*
@@ -303,12 +315,12 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
     uint32_t block_free;
     BLOCK_STATUS *block_status;
     struct anic_blkstatus_s blkstatus;
-    unsigned block_size = ANIC_DEFAULT_BLOCK_SIZE; // 2MB
 
     /* This just keeps the startup output more orderly. */
     usleep(200000 * atv->thread_id);
 
     SCLogInfo("Accolade Packet Loop Started -  thread: %u ", thread_id);
+    fprintf(stderr,"%s: Accolade Packet Loop Started -  thread: %u\n", __FUNCTION__, thread_id);
 
     TmSlot *s = (TmSlot *) slot;
     atv->slot = s->slot_next;
@@ -330,12 +342,9 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
             else
                 wq.tail = 0;
 
-            block_status = &anic_ctx->block_status[block_id];
             if ((status=AccoladeProcessBlock(block_id, atv))!=0){
                 SCReturnInt(status);
             }
-            //block_status->refcount = 0;
-            //anic_block_add(anic_ctx->handle, thread_id, block_id, 0, anic_ctx->blocks[block_id].dma_address);
             continue; // do some more work
         }
 
@@ -344,8 +353,9 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
         // --------------------------------------------------------------
         int workQueued = 0;
         for (int ring = 0; ring < ANIC_MAX_NUMBER_OF_RINGS; ring++) {
-            if ((1L << ring) & ring_mask){
-                for (int i = 0; i < 3; i++) { // pull up to 4 blocks off for each ring
+            if ((1L << ring) & ring_mask) {
+                for (int i = 0; i < 4; i++) { // pull up to 4 blocks off for each ring
+		    memset (&blkstatus, 0, sizeof(blkstatus));
                     blkcnt = anic_block_get(anic_ctx->handle, thread_id, ring, &blkstatus);
                     if (blkcnt > anic_ctx->thread_stats.thread[thread_id].blkc_max) {
                         anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
@@ -356,12 +366,16 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
                         // patch in the virtual address of the block base
                         blkstatus.buf_p = anic_ctx->blocks[block_id].buf_p;
                         // create the block header
-                        anic_create_header(block_size, &blkstatus);
+                        anic_create_header(ANIC_DEFAULT_BLOCK_SIZE, &blkstatus);
                         block_status = &anic_ctx->block_status[block_id];
-                        // this unlikely to happen
-                        assert (block_status->refcount==0);
-                    
                         block_status->blkStatus = blkstatus;
+                        // this unlikely to happen
+                        //assert (block_status->refcount==0);
+			if (block_status->refcount!=0)
+			{
+			fprintf (stderr,"%s: error block id:%u refcount:%lu\n",__FUNCTION__, block_id, block_status->refcount);
+			}
+                    
                         wq.entryA[wq.head] = block_id;
                         if (wq.head < ANIC_BLOCK_MAX_BLOCKS) {
                             wq.head++;

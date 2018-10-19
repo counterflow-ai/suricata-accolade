@@ -24,9 +24,9 @@
 #ifndef __SOURCE_ACCOLADE_H__
 #define __SOURCE_ACCOLADE_H__
 
-void TmModuleAccoladeRegister (void);
+void TmModuleAccoladeReceiveRegister (void);
 TmEcode AccoladeThreadDeinit(ThreadVars *tv, void *data);
-void TmModuleAccoladeRegister (void);
+void TmModuleAccoladeDecodeRegister (void);
 
 #ifdef HAVE_ACCOLADE
 
@@ -34,7 +34,7 @@ void TmModuleAccoladeRegister (void);
 
 typedef struct AccoladePacketVars_
 {
-    uint32_t thread_id;
+    int32_t thread_id;
     uint32_t block_id;
     ANIC_CONTEXT *anic_context;
 } AccoladePacketVars;
