@@ -168,10 +168,14 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
+<<<<<<< HEAD
     atv->thread_id = SC_ATOMIC_GET(g_thread_count);
 
 
     SC_ATOMIC_ADD(g_thread_count, 1);
+=======
+    atv->thread_id = SC_ATOMIC_ADD(g_thread_count, 1);
+>>>>>>> fd9c38260adef035bce0588364c700b240f8c97a
     atv->ring_mask = anic_ring_mask (atv->anic_context, atv->thread_id);
 
 
