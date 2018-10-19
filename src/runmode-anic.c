@@ -64,10 +64,7 @@ static void *ParseAccoladeConfig(const char *mode)
     if (mode[0]=='r' && mode[1]=='i' && mode[2]=='n' && mode[3]=='g') {
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
-<<<<<<< HEAD
         anic_context->thread_count = 1;
-=======
->>>>>>> fd9c38260adef035bce0588364c700b240f8c97a
     } else if (mode[0]=='p' && mode[1]=='o' && mode[2]=='r' && mode[3]=='t') {
         /* one thread per port */
         anic_context->ring_mode = PORT;
