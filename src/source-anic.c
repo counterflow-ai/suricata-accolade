@@ -37,7 +37,6 @@
 #include "source-anic.h"
 
 #include <sys/types.h>
-#include <machine/atomic.h>
 
 #ifndef HAVE_ACCOLADE
 
@@ -168,16 +167,15 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
-<<<<<<< HEAD
+/*<<<<<<< HEAD
     atv->thread_id = SC_ATOMIC_GET(g_thread_count);
 
 
     SC_ATOMIC_ADD(g_thread_count, 1);
 =======
+*/
     atv->thread_id = SC_ATOMIC_ADD(g_thread_count, 1);
->>>>>>> fd9c38260adef035bce0588364c700b240f8c97a
     atv->ring_mask = anic_ring_mask (atv->anic_context, atv->thread_id);
-
 
     struct rx_rmon_counts_s stats;
     if (atv->thread_id < anic_context->port_count)
@@ -199,11 +197,10 @@ static void AccoladeReleasePacket(struct Packet_ *p)
 {
     PacketFreeOrRelease(p);
     ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
-    atomic_subtract_64 (&anic_ctx->block_status[p->anic_v.block_id].refcount, 1);
-    if (anic_ctx->block_status[p->anic_v.block_id].refcount==0)
+    if (SC_ATOMIC_SUB(anic_ctx->block_status[p->anic_v.block_id].refcount, 1) == 0) 
     {
         anic_block_add(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.block_id, 0, anic_ctx->blocks[p->anic_v.block_id].dma_address);
-fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
+	//fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
     }
 }
 
@@ -226,7 +223,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
-    atomic_set_64 (&anic_ctx->block_status[block_id].refcount, blkstatus_p->pktcnt);
+    SC_ATOMIC_SET(anic_ctx->block_status[block_id].refcount, blkstatus_p->pktcnt);
 fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
     while (packets < blkstatus_p->pktcnt) {
         descriptor = (struct anic_descriptor_rx_packet_data *)buffer;
@@ -375,9 +372,9 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
                         block_status->blkStatus = blkstatus;
                         // this unlikely to happen
                         //assert (block_status->refcount==0);
-			if (block_status->refcount!=0)
+			if (SC_ATOMIC_GET(block_status->refcount)!=0)
 			{
-			fprintf (stderr,"%s: error block id:%u refcount:%lu\n",__FUNCTION__, block_id, block_status->refcount);
+			fprintf (stderr,"%s: error block id:%u refcount is not zero\n",__FUNCTION__, block_id);
 			}
                     
                         wq.entryA[wq.head] = block_id;

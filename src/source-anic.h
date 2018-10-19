@@ -30,6 +30,10 @@ void TmModuleAccoladeDecodeRegister (void);
 
 #ifdef HAVE_ACCOLADE
 
+#if __FreeBSD__
+#include <machine/atomic.h>
+#endif
+
 #include "util-anic.h"
 
 typedef struct AccoladePacketVars_
