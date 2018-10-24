@@ -109,7 +109,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
             fprintf(stderr, "anic_map_dma() failed\n");
             exit(1);
         }
-        ctx->blocks[block].buf_p = (uint8_t *)v_p;
+        ctx->blocks[block].virtual_address = (uint8_t *)v_p;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
         anic_block_add(ctx->handle, 0, block, 0, dma_info.dmaPhysicalAddress);
         //  printf("added blk:%4u to freelist dataP:%12p/0x%012lx\n", block, v_p, dma_info.dmaPhysicalAddress);
