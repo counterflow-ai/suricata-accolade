@@ -138,8 +138,6 @@ typedef struct _ANIC_CONTEXT_
 } ANIC_CONTEXT __attribute__((aligned));
 
 int anic_configure(ANIC_CONTEXT *ctx);
-uint64_t anic_ring_mask(ANIC_CONTEXT *ctx, uint32_t ring_id);
-void anic_create_header(BLOCK_STATUS *block_status, struct anic_blkstatus_s *blkStatus);
 void anic_enable_ports (ANIC_CONTEXT *ctx);
 
 #endif

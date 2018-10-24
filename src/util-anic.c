@@ -47,30 +47,6 @@
 
 #include "util-anic.h"
 
-/*
- * ---------------------------------------------------------------------------------------
- *
- * ---------------------------------------------------------------------------------------
- */
-uint64_t anic_ring_mask(ANIC_CONTEXT *ctx, uint32_t thread_id)
-{
-    uint64_t bitm = 1L;
-    uint32_t bitc = 0;
-    uint64_t ring_mask = 0;
-
-	for (uint32_t bit = 0; bit < ANIC_MAX_NUMBER_OF_RINGS; bit++)
-	{
-		if (ctx->ring_mask & bitm)
-		{
-			if (bitc % ctx->ring_count == thread_id)
-				ring_mask |= bitm;
-			bitc++;
-		}
-		bitm <<= 1;
-	}
-	return ring_mask;
-}
-
 // ------------------------------------------------------------------------------
 //
 // ------------------------------------------------------------------------------
@@ -88,15 +64,13 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
         int shmid = shmget(IPC_PRIVATE, HUGEPAGE_SIZE, shmflags);
         if (shmid == -1)
         {
-	    perror("shmget");
-            fprintf(stderr, "shmget() failure error %u %s\n", errno, strerror(errno));
+            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"shmget() failure error %u %s\n", errno, strerror(errno));
             exit(1);
         }
         void *v_p = shmat(shmid, NULL, SHM_RND);
         if (v_p == (void *)-1)
         {
-	    perror("shmat");
-            fprintf(stderr, "shmat() failure error %u %s\n", errno, strerror(errno));
+            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"shmat() failure error %u %s\n", errno, strerror(errno));
             exit(1);
         }
         shmctl(shmid, IPC_RMID, NULL);
@@ -106,13 +80,12 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
         dma_info.pageShift = ANIC_2M_PAGE;
         if (anic_map_dma(ctx->handle, &dma_info))
         {
-            fprintf(stderr, "anic_map_dma() failed\n");
+            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"anic_map_dma() failed\n");
             exit(1);
         }
         ctx->blocks[block].virtual_address = (uint8_t *)v_p;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
         anic_block_add(ctx->handle, 0, block, 0, dma_info.dmaPhysicalAddress);
-        //  printf("added blk:%4u to freelist dataP:%12p/0x%012lx\n", block, v_p, dma_info.dmaPhysicalAddress);
     }
 
 #elif __FreeBSD__
@@ -123,7 +96,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
     {
         if (anic_acquire_block(ctx->handle, &dma_info))
         {
-            fprintf(stderr, "anic_acquire_block() failed\n");
+            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"anic_acquire_block() failed\n");
             exit(1);
         }
         ctx->blocks[block].virtual_address = (uint8_t *)dma_info.userVirtualAddress;
@@ -158,27 +131,26 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	ctx->handle = anic_open("/dev/anic", ctx->index);
 	if (anic_error_code(ctx->handle) != ANIC_ERR_NONE)
 	{
-		//TODO: change this to Suricata logging
-		fprintf(stderr, "ERROR: could not anic_open: %s\n", anic_error_message(ctx->handle));
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "could not anic_open: %s\n", anic_error_message(ctx->handle));
 		anic_close(ctx->handle);
 		return -1;
 	}
 
 	if (ctx->reset)
 	{
-		fprintf(stderr, "reset and restart\n");
 		anic_reset_and_restart_pipeline(ctx->handle);
+		SCLogInfo("ANIC reset and restart\n");
 	}
 
 	char *product_name = anic_get_product_name(ctx->handle);
 	anic_get_number_of_ports(ctx->handle, &ctx->port_count);
-	printf("ANIC %s, ports:%u,  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u\n",
+	SCLogInfo("ANIC %s, ports:%u,  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u\n",
 		   product_name, ctx->port_count, ctx->handle->product_info.major_version, ctx->handle->product_info.minor_version,
 		   ctx->handle->product_info.sub_version, ctx->handle->product_info.pci_bus,
 		   ctx->handle->product_info.pci_slot, ctx->handle->product_info.pci_func);
 	if ((ctx->handle->product_info.major_version & 0xf0) != 0x40)
 	{
-		fprintf(stderr, "ERROR: firmware is not block mode DMA\n");
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "firmware is not block mode DMA\n");
 		anic_close(ctx->handle);
 		return -1;
 	}
@@ -213,7 +185,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
     		if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL)) {
             	// if large LUT is not supported, fall back to normal LUT
             	if (anic_setup_rings(ctx->handle, ctx->ring_count, 0x01, NULL)) {
-                	fprintf(stderr, "ERROR: unsupported firmware revision\n");
+                	SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "unsupported firmware revision\n");
                 	return -1;
             	}
     		}
@@ -221,7 +193,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
     }
 	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
 	{
-		fprintf(stderr, "ERROR: ring count exceeded maximum allowed.\n");
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ring count exceeded maximum allowed.\n");
 		anic_close(ctx->handle);
 		return -1;
 	}
@@ -259,7 +231,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		anic_port_ena_disa(ctx->handle, port, 1);
 	}
 
-	fprintf(stderr, "ready\n");
+        SCLogInfo("Accolade Network Interface Card (ANIC) is ready");
 	return 0;
 }
 
