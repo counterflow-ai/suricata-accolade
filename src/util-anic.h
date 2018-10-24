@@ -67,11 +67,6 @@ typedef struct _WORK_QUEUE_
   uint32_t entryA[ANIC_BLOCK_MAX_BLOCKS + 1];
 } WORK_QUEUE;
 
-typedef struct _BLOCK_STATUS_
-{
-  struct anic_blkstatus_s blkStatus;
-  SC_ATOMIC_DECLARE(uint64_t, refcount);
-} BLOCK_STATUS;
 
 typedef struct _RING_STATS_
 {
@@ -101,11 +96,17 @@ typedef struct _THREAD_STATS_
   } thread[ANIC_MAX_THREADS];
 } THREAD_STATS __attribute__((aligned));
 
-typedef struct _BLOCK_REFS_
+typedef struct _BLOCK_MAP_
 {
-  uint8_t *buf_p;
+  uint8_t *virtual_address;
   uint64_t dma_address;
-} BLOCK_REF;
+} BLOCK_MAP __attribute__((aligned));
+
+typedef struct _BLOCK_STATUS_
+{
+  struct anic_blkstatus_s blkStatus;
+  SC_ATOMIC_DECLARE(uint64_t, refcount);
+} BLOCK_STATUS __attribute__((aligned));
 
 typedef struct _BLOCK_HEADER_
 {
@@ -131,13 +132,14 @@ typedef struct _ANIC_CONTEXT_
 
   RING_STATS ring_stats;
   THREAD_STATS thread_stats;
-  BLOCK_REF blocks[ANIC_BLOCK_MAX_BLOCKS];
+  uint32_t thread_ring[ANIC_MAX_NUMBER_OF_RINGS];
+  BLOCK_MAP blocks[ANIC_BLOCK_MAX_BLOCKS];
   BLOCK_STATUS block_status[ANIC_BLOCK_MAX_BLOCKS];
 } ANIC_CONTEXT __attribute__((aligned));
 
 int anic_configure(ANIC_CONTEXT *ctx);
 uint64_t anic_ring_mask(ANIC_CONTEXT *ctx, uint32_t ring_id);
-void anic_create_header(unsigned blocksize, struct anic_blkstatus_s *status_p);
+void anic_create_header(BLOCK_STATUS *block_status, struct anic_blkstatus_s *blkStatus);
 void anic_enable_ports (ANIC_CONTEXT *ctx);
 
 #endif

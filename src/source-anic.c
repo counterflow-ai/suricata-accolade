@@ -80,7 +80,7 @@ SC_ATOMIC_DECLARE(uint64_t, g_thread_count);
 
 typedef struct AccoladeThreadVars_ {
     ANIC_CONTEXT *anic_context;
-    uint64_t ring_mask;
+    uint64_t ring_id;
     int32_t thread_id;
     uint32_t pad;
     ThreadVars *tv;
@@ -167,15 +167,8 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
-/*<<<<<<< HEAD
-    atv->thread_id = SC_ATOMIC_GET(g_thread_count);
-
-
-    SC_ATOMIC_ADD(g_thread_count, 1);
-=======
-*/
-    atv->thread_id = SC_ATOMIC_ADD(g_thread_count, 1);
-    atv->ring_mask = anic_ring_mask (atv->anic_context, atv->thread_id);
+    atv->thread_id = (SC_ATOMIC_ADD(g_thread_count, 1)-1);
+    atv->ring_id = anic_context->thread_ring [atv->thread_id];
 
     struct rx_rmon_counts_s stats;
     if (atv->thread_id < anic_context->port_count)
@@ -195,13 +188,13 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
 // ------------------------------------------------------------------------------
 static void AccoladeReleasePacket(struct Packet_ *p)
 {
-    PacketFreeOrRelease(p);
     ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
     if (SC_ATOMIC_SUB(anic_ctx->block_status[p->anic_v.block_id].refcount, 1) == 0) 
     {
         anic_block_add(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.block_id, 0, anic_ctx->blocks[p->anic_v.block_id].dma_address);
-	//fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
+//	fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
     }
+    PacketFreeOrRelease(p);
 }
 
 // ------------------------------------------------------------------------------
@@ -223,25 +216,28 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
-    SC_ATOMIC_SET(anic_ctx->block_status[block_id].refcount, blkstatus_p->pktcnt);
-fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
+//fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
     while (packets < blkstatus_p->pktcnt) {
         descriptor = (struct anic_descriptor_rx_packet_data *)buffer;
 
         // Packet header checks can be useful for basic application sanity but as noted below,
         // they're not universially applicable so plan accordingly.
         assert(descriptor->type == 0);
+        if (descriptor->anyerr) {	//TODO: remove
+		fprintf(stderr,"%s:  error %u\n", __FUNCTION__, descriptor->anyerr);
+	}
         assert(descriptor->port < ANIC_MAX_PORTS);
         assert(descriptor->length <= 14348);
         assert(descriptor->origlength <= 14332);
         // these 2 checks will fail in the presence of DMAed runts (40K3) or packets sliced to less than 60
         assert(descriptor->length >= 76);
+        // point to the next descriptor
+        buffer += (descriptor->length + 7) & ~7;
+
         assert(descriptor->origlength >= 60);
         // this check will fail on any sliced packet
         assert(descriptor->length - descriptor->origlength == 16);
 
-        // point to the next descriptor
-        buffer += (descriptor->length + 7) & ~7;
 
         packet = (uint8_t *)&descriptor[1];
        
@@ -258,7 +254,7 @@ fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, threa
         p->ts.tv_sec = descriptor->timestamp >> 32;
         p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
 
-        if (unlikely(PacketSetData(p, (uint8_t *)packet,  descriptor->length - 16))) {
+        if (unlikely(PacketSetData(p, (uint8_t *)packet,  descriptor->origlength))) {
             TmqhOutputPacketpool(atv->tv, p);
             SCReturnInt(TM_ECODE_FAILED);
         }
@@ -269,7 +265,7 @@ fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, threa
         }
 
         packets++;
-        bytes += descriptor->length;
+        bytes += (descriptor->length-16);
         if (descriptor->anyerr) {
             packet_errors++;
         }
@@ -308,13 +304,10 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
     AccoladeThreadVars *atv = (AccoladeThreadVars *) data;
     ANIC_CONTEXT *anic_ctx = atv->anic_context;
     uint32_t thread_id = atv->thread_id;
-    uint64_t ring_mask = anic_ring_mask (anic_ctx, thread_id);
+    uint64_t ring_id = atv->ring_id;
 
     uint32_t block_id;
-    uint32_t blkcnt;
-    WORK_QUEUE wq;
     uint32_t block_free;
-    BLOCK_STATUS *block_status;
     struct anic_blkstatus_s blkstatus;
 
     /* This just keeps the startup output more orderly. */
@@ -326,86 +319,37 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
     TmSlot *s = (TmSlot *) slot;
     atv->slot = s->slot_next;
 
-    memset(&wq, 0, sizeof(wq));
-
     while (!(suricata_ctl_flags & SURICATA_STOP)) {
         /* make sure we have at least one packet in the packet pool, to prevent
          * us from alloc'ing packets at line rate */
         PacketPoolWait();
 
-        // --------------------------------------------------------------
-        // Check work queue for blocks of packets
-        // --------------------------------------------------------------
-        if (wq.tail != wq.head) {
-            block_id = wq.entryA[wq.tail];
-            if (wq.tail < ANIC_BLOCK_MAX_BLOCKS)
-                wq.tail++;
-            else
-                wq.tail = 0;
-
-            if ((status=AccoladeProcessBlock(block_id, atv))!=0){
-                SCReturnInt(status);
-            }
-            continue; // do some more work
+        memset (&blkstatus, 0, sizeof(blkstatus));
+        uint32_t blkcnt = anic_block_get(anic_ctx->handle, thread_id, ring_id, &blkstatus);
+        if (blkcnt > anic_ctx->thread_stats.thread[thread_id].blkc_max) {
+        	anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
         }
-
-        // --------------------------------------------------------------
-        // work queue is empty, service anic rings for more blocks
-        // --------------------------------------------------------------
-        int workQueued = 0;
-        for (int ring = 0; ring < ANIC_MAX_NUMBER_OF_RINGS; ring++) {
-            if ((1L << ring) & ring_mask) {
-                for (int i = 0; i < 4; i++) { // pull up to 4 blocks off for each ring
-		    memset (&blkstatus, 0, sizeof(blkstatus));
-                    blkcnt = anic_block_get(anic_ctx->handle, thread_id, ring, &blkstatus);
-                    if (blkcnt > anic_ctx->thread_stats.thread[thread_id].blkc_max) {
-                        anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
-                    }
-                    if (blkcnt > 0) {
-                        workQueued = 1;
-                        block_id = blkstatus.blkid;
-                        // patch in the virtual address of the block base
-                        blkstatus.buf_p = anic_ctx->blocks[block_id].buf_p;
-                        // create the block header
-                        anic_create_header(ANIC_DEFAULT_BLOCK_SIZE, &blkstatus);
-                        block_status = &anic_ctx->block_status[block_id];
-                        block_status->blkStatus = blkstatus;
-                        // this unlikely to happen
-                        //assert (block_status->refcount==0);
-			if (SC_ATOMIC_GET(block_status->refcount)!=0)
-			{
-			fprintf (stderr,"%s: error block id:%u refcount is not zero\n",__FUNCTION__, block_id);
-			}
-                    
-                        wq.entryA[wq.head] = block_id;
-                        if (wq.head < ANIC_BLOCK_MAX_BLOCKS) {
-                            wq.head++;
-                        }
-                        else {
-                            wq.head = 0;
-                        }
-                    }
-                    else {
-                        break; // next ring
-                    }
+        if (blkcnt > 0) {
+        	block_id = blkstatus.blkid;
+                // patch in the virtual address of the block base
+                blkstatus.buf_p = anic_ctx->blocks[block_id].virtual_address;
+        	memcpy (&anic_ctx->block_status[block_id].blkStatus, &blkstatus, sizeof (struct anic_blkstatus_s));
+        	SC_ATOMIC_SET(anic_ctx->block_status[block_id].refcount, blkstatus.pktcnt);
+            	if ((status=AccoladeProcessBlock(block_id, atv))!=0){
+                   SCReturnInt(status);
                 }
-            }
         }
-
-        // --------------------------------------------------------------
-        // update buffer counts for status
-        // --------------------------------------------------------------
-        block_free = anic_block_get_freecount(anic_ctx->handle, 0);
-        if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
-            anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
-        }
-        if (workQueued) {
-            continue; // perform work
-        }
-
+	else {
+        	// --------------------------------------------------------------
+        	// update buffer counts for status
+        	// --------------------------------------------------------------
+        	block_free = anic_block_get_freecount(anic_ctx->handle, 0);
+        	if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
+            		anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
+        	}
+	}
         // no work, sleep for a bit
         usleep(1000);
-
         StatsSyncCountersIfSignalled(tv);
     }
 

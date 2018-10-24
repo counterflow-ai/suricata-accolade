@@ -46,23 +46,6 @@
 
 
 #include "util-anic.h"
-// ------------------------------------------------------------------------------
-//
-// ------------------------------------------------------------------------------
-inline void anic_create_header(unsigned blocksize, struct anic_blkstatus_s *status_p)
-{
-	uint8_t *buf_p = status_p->buf_p;
-	BLOCK_HEADER *header_p = (BLOCK_HEADER *)buf_p;
-	struct anic_descriptor_rx_packet_data *desc_p;
-
-	header_p->block_size = blocksize;
-	header_p->packet_count = status_p->pktcnt;
-	desc_p = (struct anic_descriptor_rx_packet_data *)&buf_p[status_p->firstpkt_offset];
-	header_p->first_timestamp = desc_p->timestamp;
-	desc_p = (struct anic_descriptor_rx_packet_data *)&buf_p[status_p->lastpkt_offset];
-	header_p->last_timestamp = desc_p->timestamp;
-	header_p->byte_count = status_p->lastpkt_offset + desc_p->length;
-}
 
 /*
  * ---------------------------------------------------------------------------------------
@@ -143,7 +126,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
             fprintf(stderr, "anic_acquire_block() failed\n");
             exit(1);
         }
-        ctx->blocks[block].buf_p = (uint8_t *)dma_info.userVirtualAddress;
+        ctx->blocks[block].virtual_address = (uint8_t *)dma_info.userVirtualAddress;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
         anic_block_add(ctx->handle, 0, block, 0, ctx->blocks[block].dma_address);
     }
@@ -189,8 +172,8 @@ int anic_configure(ANIC_CONTEXT *ctx)
 
 	char *product_name = anic_get_product_name(ctx->handle);
 	anic_get_number_of_ports(ctx->handle, &ctx->port_count);
-	printf("ANIC %s  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u\n",
-		   product_name, ctx->handle->product_info.major_version, ctx->handle->product_info.minor_version,
+	printf("ANIC %s, ports:%u,  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u\n",
+		   product_name, ctx->port_count, ctx->handle->product_info.major_version, ctx->handle->product_info.minor_version,
 		   ctx->handle->product_info.sub_version, ctx->handle->product_info.pci_bus,
 		   ctx->handle->product_info.pci_slot, ctx->handle->product_info.pci_func);
 	if ((ctx->handle->product_info.major_version & 0xf0) != 0x40)
@@ -201,14 +184,6 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	}
 	// print out the FIFO capacity
 	//printf("port FIFO capacity  %10u quad-words\n", anic_port_get_queued_limit(ctx->handle));
-
-	ctx->ring_count = (ctx->port_count);
-	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
-	{
-		fprintf(stderr, "ERROR: ring count exceeded maximum allowed.\n");
-		anic_close(ctx->handle);
-		return -1;
-	}
 
     switch (ctx->ring_mode) {
 		case RING16:
@@ -230,9 +205,9 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		case LOADBALANCE:
 		default:
         	/* load balance mode */
-        	ctx->ring_count = 8;
-		//TODO:  check this
+        	ctx->ring_count = 8; 
         	ctx->ring_mask = (0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
+        	ctx->ring_count += 1; // add ring 63
         	anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
         	anic_pduproc_dma_pktseq(ctx->handle, 1);
     		if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL)) {
@@ -244,7 +219,12 @@ int anic_configure(ANIC_CONTEXT *ctx)
     		}
 		break;
     }
-	// one-to-one mapping ring to thread
+	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
+	{
+		fprintf(stderr, "ERROR: ring count exceeded maximum allowed.\n");
+		anic_close(ctx->handle);
+		return -1;
+	}
 	ctx->thread_count = ctx->ring_count;
 
 	// enable packet slicing if necessary
@@ -257,10 +237,12 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	anic_map_blocks(ctx, ANIC_BLOCK_MAX_BLOCKS);
 
 	// enable rings
-	for (int i = 0; i < ANIC_MAX_NUMBER_OF_RINGS; i++)
+        uint32_t thread_id = 0;
+	for (uint32_t i = 0; i < ANIC_MAX_NUMBER_OF_RINGS; i++)
 	{
 		if ((1L << i) & ctx->ring_mask)
 		{
+			ctx->thread_ring [thread_id++]=i;
 			anic_block_set_ring_nodetag(ctx->handle, i, 0);
 			anic_block_ena_ring(ctx->handle, i, 1);
 		}

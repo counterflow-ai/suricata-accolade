@@ -60,7 +60,7 @@ static void *ParseAccoladeConfig(const char *mode)
         return NULL;
     }
     memset(anic_context, 0, sizeof(ANIC_CONTEXT));
-
+fprintf(stderr,"%s ==============\n", __FUNCTION__);
     if (mode[0]=='r' && mode[1]=='i' && mode[2]=='n' && mode[3]=='g') {
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
@@ -69,6 +69,7 @@ static void *ParseAccoladeConfig(const char *mode)
         /* one thread per port */
         anic_context->ring_mode = PORT;
         anic_context->thread_count = 4;
+fprintf (stderr,"PORT======================\n");
     } else if (mode[0]=='l' && mode[1]=='o' && mode[2]=='a' && mode[3]=='d') {
         /* load balance mode */
         anic_context->ring_mode = LOADBALANCE;
@@ -77,7 +78,9 @@ static void *ParseAccoladeConfig(const char *mode)
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade mode");
         exit(EXIT_FAILURE);
     } 
-
+//TODO: hardcoded for testing
+//anic_context->ring_mode = PORT;
+//anic_context->thread_count = 4;
     anic_context->reset = 1;
     if (ConfGetInt("accolade.nic", &anic_context->index) != 0){
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade NIC index");
@@ -102,6 +105,7 @@ void RunModeAccoladeRegister(void)
 {
 #ifdef HAVE_ACCOLADE
     default_mode = "autofp";
+    //default_mode = "single";
 
     RunModeRegisterNewRunMode(RUNMODE_ANIC, "autofp",
         "Multi threaded ANIC mode.  Packets from "
