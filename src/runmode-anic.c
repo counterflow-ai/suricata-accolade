@@ -57,7 +57,7 @@ static void *ParseAccoladeConfig(const char *mode)
 {
     ANIC_CONTEXT *anic_context = SCCalloc(1, sizeof (ANIC_CONTEXT));
     if (unlikely(anic_context == NULL)) {
-        SCLogError(SC_ERR_MEM_ALLOC, "Failed to allocate memory for Accolade device context.");
+        SCLogError(SC_ERR_MEM_ALLOC, "failed to allocate memory for Accolade device context.");
         return NULL;
     }
     memset(anic_context, 0, sizeof(ANIC_CONTEXT));
@@ -65,6 +65,7 @@ static void *ParseAccoladeConfig(const char *mode)
     if (ConfGetInt("anic.interface", &anic_context->index) != 1) {
     	anic_context->index=0;
     }
+
     const char*steer_mode = NULL;
     if (ConfGet("anic.steer_mode", &steer_mode) != 1) {
     	steer_mode="steerlb";
@@ -74,41 +75,37 @@ static void *ParseAccoladeConfig(const char *mode)
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
         anic_context->thread_count = 1;
-fprintf (stderr,"%s:%u ======== %s:steer16\n", __FUNCTION__, __LINE__, mode);
+        SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
     }
     else {
 	if (strncmp(steer_mode,"steer0123",9)==0) {
        	   /* one thread per port */
            anic_context->ring_mode = PORT;
            anic_context->thread_count = 4;
-fprintf (stderr,"%s:%u ======== %s:steer0123\n", __FUNCTION__, __LINE__, mode);
+           SCLogInfo("ANIC interface:%lu, mode %s:steer0123\n", anic_context->index, mode);
         } 
 	else if (strncmp(steer_mode,"steer16",7)==0) {
-        /* all ports merged into one thead */
-        anic_context->ring_mode = RING16;
-        anic_context->thread_count = 1;
-fprintf (stderr,"%s:%u ======== %s:steer16\n", __FUNCTION__, __LINE__, mode);
+           /* all ports merged into one thead */
+           anic_context->ring_mode = RING16;
+           anic_context->thread_count = 1;
+           SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
         }
 	else if (strncmp(steer_mode,"steerlb",7)==0) {
            /* load balance mode */
            anic_context->ring_mode = LOADBALANCE;
            anic_context->thread_count = 8;
-fprintf (stderr,"%s:%u ======== %s:steerlb\n", __FUNCTION__, __LINE__, mode);
+           SCLogInfo("ANIC interface:%lu, mode %s:steerlb\n", anic_context->index, mode);
 	}
         else { // undefined
-           SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade steer mode");
+           SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "invalid Accolade steer mode");
            exit(EXIT_FAILURE);
 	}
     }
 
     anic_context->reset = 1;
-    if (ConfGetInt("accolade.nic", &anic_context->index) != 0){
-        SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade NIC index");
-        exit(EXIT_FAILURE);
-    }
     
     if (anic_configure(anic_context) < 0) {
-        SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Failed to initialize Accolade NIC");
+        SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "failed to initialize Accolade NIC");
         exit(EXIT_FAILURE);
     }
 
@@ -124,8 +121,7 @@ const char *RunModeAccoladeGetDefaultMode(void)
 void RunModeAccoladeRegister(void)
 {
 #ifdef HAVE_ACCOLADE
-    //default_mode = "single";
-    default_mode = "workers";
+    default_mode = "autofp";
 
     RunModeRegisterNewRunMode(RUNMODE_ANIC, "autofp",
         "Multi threaded ANIC mode.  Packets from "
