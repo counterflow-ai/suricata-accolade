@@ -101,7 +101,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
         }
         ctx->blocks[block].virtual_address = (uint8_t *)dma_info.userVirtualAddress;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
-        anic_block_add(ctx->handle, 0, block, 0, ctx->blocks[block].dma_address);
+        anic_block_add(ctx->handle, 0,block,0,ctx->blocks[block].dma_address);
     }
 
 #else
@@ -119,25 +119,16 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
  */
 int anic_configure(ANIC_CONTEXT *ctx)
 {
-	// Validate/process arguments
-	if (ctx->index < 0)
-	{
-		//TODO: change this to Suricata logging
-		fprintf(stderr, "%s:%u argument error: anicIndex argument must be specified\n", __FUNCTION__, __LINE__);
-		return -1;
-	}
-
 	// Open anic device
 	ctx->handle = anic_open("/dev/anic", ctx->index);
-	if (anic_error_code(ctx->handle) != ANIC_ERR_NONE)
-	{
-		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "could not anic_open: %s\n", anic_error_message(ctx->handle));
+	if (anic_error_code(ctx->handle) != ANIC_ERR_NONE) {
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ANIC interace %d : %s\n",
+		           (int)ctx->index, anic_error_message(ctx->handle));
 		anic_close(ctx->handle);
 		return -1;
 	}
 
-	if (ctx->reset)
-	{
+	if (ctx->reset) {
 		anic_reset_and_restart_pipeline(ctx->handle);
 		SCLogInfo("ANIC reset and restart\n");
 	}
@@ -148,8 +139,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		   product_name, ctx->port_count, ctx->handle->product_info.major_version, ctx->handle->product_info.minor_version,
 		   ctx->handle->product_info.sub_version, ctx->handle->product_info.pci_bus,
 		   ctx->handle->product_info.pci_slot, ctx->handle->product_info.pci_func);
-	if ((ctx->handle->product_info.major_version & 0xf0) != 0x40)
-	{
+	if ((ctx->handle->product_info.major_version & 0xf0) != 0x40) {
 		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "firmware is not block mode DMA\n");
 		anic_close(ctx->handle);
 		return -1;
@@ -183,16 +173,15 @@ int anic_configure(ANIC_CONTEXT *ctx)
         	anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
         	anic_pduproc_dma_pktseq(ctx->handle, 1);
     		if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL)) {
-            	// if large LUT is not supported, fall back to normal LUT
-            	if (anic_setup_rings(ctx->handle, ctx->ring_count, 0x01, NULL)) {
+            	   // if large LUT is not supported, fall back to normal LUT
+            	   if (anic_setup_rings(ctx->handle, ctx->ring_count, 0x01, NULL)) {
                 	SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "unsupported firmware revision\n");
                 	return -1;
-            	}
+            	   }
     		}
 		break;
     }
-	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
-	{
+	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS) {
 		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ring count exceeded maximum allowed.\n");
 		anic_close(ctx->handle);
 		return -1;
@@ -200,8 +189,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	ctx->thread_count = ctx->ring_count;
 
 	// enable packet slicing if necessary
-	if (ctx->slice)
-	{
+	if (ctx->slice) {
 		anic_pduproc_slice(ctx->handle, ctx->slice);
 	}
 
@@ -210,10 +198,8 @@ int anic_configure(ANIC_CONTEXT *ctx)
 
 	// enable rings
         uint32_t thread_id = 0;
-	for (uint32_t i = 0; i < ANIC_MAX_NUMBER_OF_RINGS; i++)
-	{
-		if ((1L << i) & ctx->ring_mask)
-		{
+	for (uint32_t i = 0; i < ANIC_MAX_NUMBER_OF_RINGS; i++) {
+		if ((1L << i) & ctx->ring_mask) {
 			ctx->thread_ring [thread_id++]=i;
 			anic_block_set_ring_nodetag(ctx->handle, i, 0);
 			anic_block_ena_ring(ctx->handle, i, 1);
@@ -224,8 +210,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	anic_block_set_timeouts(ctx->handle, 1000, 1000);
 
 	// Clear the RMON and PKIF counters, then enable port
-	for (int port = 0; port < (ctx->port_count); port++)
-	{
+	for (int port = 0; port < (ctx->port_count); port++) {
 		anic_get_rx_rmon_counts(ctx->handle, port, 1, NULL);
 		anic_port_get_counts(ctx->handle, port, 1, NULL);
 		anic_port_ena_disa(ctx->handle, port, 1);

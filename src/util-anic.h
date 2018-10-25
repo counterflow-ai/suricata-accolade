@@ -42,7 +42,7 @@
 #include <anic_api_private.h>
 
 #ifndef ANIC_BLOCK_MAX_BLOCKS
-#define ANIC_BLOCK_MAX_BLOCKS 1024
+#define ANIC_BLOCK_MAX_BLOCKS 256
 #endif
 
 #define ANIC_MAX_PORTS 4

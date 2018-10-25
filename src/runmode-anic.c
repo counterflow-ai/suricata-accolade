@@ -37,6 +37,7 @@
 #include "util-time.h"
 #include "util-cpu.h"
 #include "util-affinity.h"
+#include "util-device.h"
 #include "util-runmodes.h"
 
 #ifdef HAVE_ACCOLADE
@@ -60,27 +61,46 @@ static void *ParseAccoladeConfig(const char *mode)
         return NULL;
     }
     memset(anic_context, 0, sizeof(ANIC_CONTEXT));
-fprintf(stderr,"%s ==============\n", __FUNCTION__);
-    if (mode[0]=='r' && mode[1]=='i' && mode[2]=='n' && mode[3]=='g') {
+
+    if (ConfGetInt("anic.interface", &anic_context->index) != 1) {
+    	anic_context->index=0;
+    }
+    const char*steer_mode = NULL;
+    if (ConfGet("anic.steer_mode", &steer_mode) != 1) {
+    	steer_mode="steerlb";
+    }
+
+    if (strncmp (mode,"single",6)==0) {
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
         anic_context->thread_count = 1;
-    } else if (mode[0]=='p' && mode[1]=='o' && mode[2]=='r' && mode[3]=='t') {
-        /* one thread per port */
-        anic_context->ring_mode = PORT;
-        anic_context->thread_count = 4;
-fprintf (stderr,"PORT======================\n");
-    } else if (mode[0]=='l' && mode[1]=='o' && mode[2]=='a' && mode[3]=='d') {
-        /* load balance mode */
-        anic_context->ring_mode = LOADBALANCE;
-        anic_context->thread_count = 8;
-    } else {
-        SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade mode");
-        exit(EXIT_FAILURE);
-    } 
-//TODO: hardcoded for testing
-//anic_context->ring_mode = PORT;
-//anic_context->thread_count = 4;
+fprintf (stderr,"%s:%u ======== %s:steer16\n", __FUNCTION__, __LINE__, mode);
+    }
+    else {
+	if (strncmp(steer_mode,"steer0123",9)==0) {
+       	   /* one thread per port */
+           anic_context->ring_mode = PORT;
+           anic_context->thread_count = 4;
+fprintf (stderr,"%s:%u ======== %s:steer0123\n", __FUNCTION__, __LINE__, mode);
+        } 
+	else if (strncmp(steer_mode,"steer16",7)==0) {
+        /* all ports merged into one thead */
+        anic_context->ring_mode = RING16;
+        anic_context->thread_count = 1;
+fprintf (stderr,"%s:%u ======== %s:steer16\n", __FUNCTION__, __LINE__, mode);
+        }
+	else if (strncmp(steer_mode,"steerlb",7)==0) {
+           /* load balance mode */
+           anic_context->ring_mode = LOADBALANCE;
+           anic_context->thread_count = 8;
+fprintf (stderr,"%s:%u ======== %s:steerlb\n", __FUNCTION__, __LINE__, mode);
+	}
+        else { // undefined
+           SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade steer mode");
+           exit(EXIT_FAILURE);
+	}
+    }
+
     anic_context->reset = 1;
     if (ConfGetInt("accolade.nic", &anic_context->index) != 0){
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "Invalid Accolade NIC index");
@@ -104,8 +124,8 @@ const char *RunModeAccoladeGetDefaultMode(void)
 void RunModeAccoladeRegister(void)
 {
 #ifdef HAVE_ACCOLADE
-    default_mode = "autofp";
     //default_mode = "single";
+    default_mode = "workers";
 
     RunModeRegisterNewRunMode(RUNMODE_ANIC, "autofp",
         "Multi threaded ANIC mode.  Packets from "
@@ -135,13 +155,14 @@ int RunModeAccoladeSingle(void)
 
     TimeModeSetLive();
 
+    LiveRegisterDevice("anic");
 
     ret = RunModeSetLiveCaptureSingle(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
         "AccoladeReceive",
         "AccoladeDecode",
         thread_name_single,
-        "ring16");
+        "single");
     if (ret != 0) {
         SCLogError(SC_ERR_RUNMODE, "ANIC single runmode failed to start");
         exit(EXIT_FAILURE);
@@ -162,12 +183,14 @@ int RunModeAccoladeAutoFp(void)
 
     TimeModeSetLive();
 
+    LiveRegisterDevice("anic");
+
     ret = RunModeSetLiveCaptureAutoFp(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
         "AccoladeReceive",
         "AccoladeDecode",
         thread_name_autofp,
-        "loadbalance");
+        "autofp");
     if (ret != 0) {
         SCLogError(SC_ERR_RUNMODE, "ANIC autofp runmode failed to start");
         exit(EXIT_FAILURE);
@@ -188,12 +211,14 @@ int RunModeAccoladeWorkers(void)
 
     TimeModeSetLive();
 
+    LiveRegisterDevice("anic");
+
     ret = RunModeSetLiveCaptureWorkers(ParseAccoladeConfig,
         AccoladeConfigGetThreadCount,
         "AccoladeReceive",
         "AccoladeDecode",
         thread_name_workers,
-        "port");
+        "workers");
     if (ret != 0) {
         SCLogError(SC_ERR_RUNMODE, "ANIC workers runmode failed to start");
         exit(EXIT_FAILURE);

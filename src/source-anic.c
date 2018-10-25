@@ -188,11 +188,13 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
 // ------------------------------------------------------------------------------
 static void AccoladeReleasePacket(struct Packet_ *p)
 {
+    if (!PKT_IS_PSEUDOPKT(p)) {
     ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
     if (SC_ATOMIC_SUB(anic_ctx->block_status[p->anic_v.block_id].refcount, 1) == 0) 
     {
         anic_block_add(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.block_id, 0, anic_ctx->blocks[p->anic_v.block_id].dma_address);
 //	fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
+    }
     }
     PacketFreeOrRelease(p);
 }
@@ -205,42 +207,41 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     ANIC_CONTEXT *anic_ctx = atv->anic_context;
     const struct anic_blkstatus_s *blkstatus_p = &anic_ctx->block_status[block_id].blkStatus;
 
-    uint8_t *packet;
     uint32_t packets = 0;
     uint32_t bytes = 0;
     uint32_t packet_errors = 0;
     uint32_t timestamp_errors = 0;
     uint32_t validation_errors = 0;
-    uint32_t thread_id = atv->thread_id;
-    uint32_t ring_id = blkstatus_p->ringid;
+    const uint32_t thread_id = atv->thread_id;
+    const uint32_t ring_id = blkstatus_p->ringid;
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
 //fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
     while (packets < blkstatus_p->pktcnt) {
         descriptor = (struct anic_descriptor_rx_packet_data *)buffer;
+        // point to the next descriptor
+        buffer += (descriptor->length + 7) & ~7;
 
         // Packet header checks can be useful for basic application sanity but as noted below,
         // they're not universially applicable so plan accordingly.
-        assert(descriptor->type == 0);
+        if (descriptor->type == ANIC_DESCRIPTOR_RX_TEARDOWN_MESSAGE) {
+fprintf (stderr,"%s: ANIC_DESCRIPTOR_RX_TEARDOWN_MESSAGE\n", __FUNCTION__);
+        }
+        assert(descriptor->type == ANIC_DESCRIPTOR_RX_PACKET_DATA);
         if (descriptor->anyerr) {	//TODO: remove
-		fprintf(stderr,"%s:  error %u\n", __FUNCTION__, descriptor->anyerr);
+            SCLogError(SC_ERR_DATALINK_UNIMPLEMENTED, "Error: Accolade packet error %" PRId32 " ", descriptor->anyerr);
 	}
         assert(descriptor->port < ANIC_MAX_PORTS);
         assert(descriptor->length <= 14348);
         assert(descriptor->origlength <= 14332);
-        // these 2 checks will fail in the presence of DMAed runts (40K3) or packets sliced to less than 60
         assert(descriptor->length >= 76);
-        // point to the next descriptor
-        buffer += (descriptor->length + 7) & ~7;
-
         assert(descriptor->origlength >= 60);
-        // this check will fail on any sliced packet
         assert(descriptor->length - descriptor->origlength == 16);
 
+        uint8_t *packet = (uint8_t *)&descriptor[1];
+        uint32_t packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
 
-        packet = (uint8_t *)&descriptor[1];
-       
         Packet *p = PacketGetFromQueueOrAlloc();
         if (unlikely(p == NULL)) {
             SCReturnInt(TM_ECODE_FAILED);
@@ -254,7 +255,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
         p->ts.tv_sec = descriptor->timestamp >> 32;
         p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
 
-        if (unlikely(PacketSetData(p, (uint8_t *)packet,  descriptor->origlength))) {
+        if (unlikely(PacketSetData(p, (uint8_t *)packet, packet_length))) {
             TmqhOutputPacketpool(atv->tv, p);
             SCReturnInt(TM_ECODE_FAILED);
         }
@@ -265,13 +266,14 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
         }
 
         packets++;
-        bytes += (descriptor->length-16);
+        bytes += (descriptor->origlength);
         if (descriptor->anyerr) {
             packet_errors++;
         }
     }
 
     if (blkstatus_p->pktcnt != packets) {
+	//TODO:
 	fprintf(stderr,"%s: ERROR: pktcnt != packets\n", __FUNCTION__);
 	exit (0);
     }
@@ -436,17 +438,7 @@ TmEcode AccoladeDecode(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
 
     // update counters
     DecodeUpdatePacketCounters(tv, dtv, p);
-
-    switch (p->datalink) {
-        case LINKTYPE_ETHERNET:
-            DecodeEthernet(tv, dtv, p, GET_PKT_DATA(p), GET_PKT_LEN(p), pq);
-            break;
-        default:
-            SCLogError(SC_ERR_DATALINK_UNIMPLEMENTED,
-                    "Error: datalink type %" PRId32 " not yet supported in module AccoladeDecode",
-                    p->datalink);
-            break;
-    }
+    DecodeEthernet(tv, dtv, p, GET_PKT_DATA(p), GET_PKT_LEN(p), pq);
 
     PacketDecodeFinalize(tv, dtv, p);
     SCReturnInt(TM_ECODE_OK);
