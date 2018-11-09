@@ -80,9 +80,8 @@ SC_ATOMIC_DECLARE(uint64_t, g_thread_count);
 
 typedef struct AccoladeThreadVars_ {
     ANIC_CONTEXT *anic_context;
-    uint64_t ring_id;
+    uint32_t ring_id;
     int32_t thread_id;
-    uint32_t pad;
     ThreadVars *tv;
     TmSlot *slot;
 } AccoladeThreadVars;
@@ -189,12 +188,8 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
 static void AccoladeReleasePacket(struct Packet_ *p)
 {
     if (!PKT_IS_PSEUDOPKT(p)) {
-    ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
-    if (SC_ATOMIC_SUB(anic_ctx->block_status[p->anic_v.block_id].refcount, 1) == 0) 
-    {
-        anic_block_add(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.block_id, 0, anic_ctx->blocks[p->anic_v.block_id].dma_address);
-//	fprintf(stderr,"%s: thread id:%u, block id:%u\n", __FUNCTION__, p->anic_v.thread_id, p->anic_v.block_id);
-    }
+       ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
+       SC_ATOMIC_SUB(anic_ctx->block_status[p->anic_v.block_id].refcount, 1);
     }
     PacketFreeOrRelease(p);
 }
@@ -215,31 +210,39 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     const uint32_t thread_id = atv->thread_id;
     const uint32_t ring_id = blkstatus_p->ringid;
     struct anic_descriptor_rx_packet_data *descriptor;
-    uint8_t *buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
+    uint8_t *next_buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
-//fprintf (stderr,"%s: thread id: %u, block id: %i, ref:%u\n", __FUNCTION__, thread_id, block_id, blkstatus_p->pktcnt);
     while (packets < blkstatus_p->pktcnt) {
-        descriptor = (struct anic_descriptor_rx_packet_data *)buffer;
+        descriptor = (struct anic_descriptor_rx_packet_data *)next_buffer;
         // point to the next descriptor
-        buffer += (descriptor->length + 7) & ~7;
+        next_buffer += (descriptor->length + 7) & ~7;
 
         // Packet header checks can be useful for basic application sanity but as noted below,
         // they're not universially applicable so plan accordingly.
         if (descriptor->type == ANIC_DESCRIPTOR_RX_TEARDOWN_MESSAGE) {
+//TODO: remove
 fprintf (stderr,"%s: ANIC_DESCRIPTOR_RX_TEARDOWN_MESSAGE\n", __FUNCTION__);
+            SCReturnInt(TM_ECODE_FAILED);
         }
-        assert(descriptor->type == ANIC_DESCRIPTOR_RX_PACKET_DATA);
+        if (descriptor->type != ANIC_DESCRIPTOR_RX_PACKET_DATA) {
+//TODO: remove
+fprintf (stderr,"%s: invalid ANIC_DESCRIPTOR_RX_PACKET_DATA [type:%u, loop:%u, count:%u]\n", __FUNCTION__, descriptor->type, packets, blkstatus_p->pktcnt);
+            SCReturnInt(TM_ECODE_FAILED);
+        }
         if (descriptor->anyerr) {	//TODO: remove
             SCLogError(SC_ERR_DATALINK_UNIMPLEMENTED, "Error: Accolade packet error %" PRId32 " ", descriptor->anyerr);
 	}
+#if 1
         assert(descriptor->port < ANIC_MAX_PORTS);
         assert(descriptor->length <= 14348);
         assert(descriptor->origlength <= 14332);
         assert(descriptor->length >= 76);
         assert(descriptor->origlength >= 60);
         assert(descriptor->length - descriptor->origlength == 16);
+#endif
 
-        uint8_t *packet = (uint8_t *)&descriptor[1];
+        //uint8_t *packet = (uint8_t *)&descriptor[1];
+        uint8_t *packet = (uint8_t *) (descriptor+sizeof(struct anic_descriptor_rx_packet_data)); 
         uint32_t packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
 
         Packet *p = PacketGetFromQueueOrAlloc();
@@ -250,7 +253,7 @@ fprintf (stderr,"%s: ANIC_DESCRIPTOR_RX_TEARDOWN_MESSAGE\n", __FUNCTION__);
         p->ReleasePacket = AccoladeReleasePacket;
         p->anic_v.anic_context = anic_ctx;
         p->anic_v.block_id = block_id;
-        p->anic_v.thread_id = atv->thread_id;
+        //p->anic_v.thread_id = atv->thread_id;
         p->datalink = LINKTYPE_ETHERNET;
         p->ts.tv_sec = descriptor->timestamp >> 32;
         p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
@@ -305,12 +308,10 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
 
     AccoladeThreadVars *atv = (AccoladeThreadVars *) data;
     ANIC_CONTEXT *anic_ctx = atv->anic_context;
-    uint32_t thread_id = atv->thread_id;
-    uint64_t ring_id = atv->ring_id;
-
-    uint32_t block_id;
-    uint32_t block_free;
+    const uint32_t thread_id = atv->thread_id;
+    const uint64_t ring_id = atv->ring_id;
     struct anic_blkstatus_s blkstatus;
+    TmSlot *s = (TmSlot *) slot;
 
     /* This just keeps the startup output more orderly. */
     usleep(200000 * atv->thread_id);
@@ -318,9 +319,7 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
     SCLogInfo("Accolade Packet Loop Started -  thread: %u ", thread_id);
     fprintf(stderr,"%s: Accolade Packet Loop Started -  thread: %u\n", __FUNCTION__, thread_id);
 
-    TmSlot *s = (TmSlot *) slot;
     atv->slot = s->slot_next;
-
     while (!(suricata_ctl_flags & SURICATA_STOP)) {
         /* make sure we have at least one packet in the packet pool, to prevent
          * us from alloc'ing packets at line rate */
@@ -332,27 +331,44 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
         	anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
         }
         if (blkcnt > 0) {
-        	block_id = blkstatus.blkid;
+        	uint32_t block_id = blkstatus.blkid;
                 // patch in the virtual address of the block base
                 blkstatus.buf_p = anic_ctx->blocks[block_id].virtual_address;
+		// housekeeping, update the status block
         	memcpy (&anic_ctx->block_status[block_id].blkStatus, &blkstatus, sizeof (struct anic_blkstatus_s));
+                anic_ctx->block_status[block_id].inuse = 1;
+                anic_ctx->block_status[block_id].thread_id = thread_id;
         	SC_ATOMIC_SET(anic_ctx->block_status[block_id].refcount, blkstatus.pktcnt);
+
             	if ((status=AccoladeProcessBlock(block_id, atv))!=0){
                    SCReturnInt(status);
                 }
         }
 	else {
-        	// --------------------------------------------------------------
-        	// update buffer counts for status
-        	// --------------------------------------------------------------
-        	block_free = anic_block_get_freecount(anic_ctx->handle, 0);
-        	if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
-            		anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
-        	}
+        /*
+         * Check status of blocks (packet buffers) in flight, i.e. used by Suricata, 
+         * and add back to the ANIC pool. Note, that a buffer is consider done when
+         * when the reference count is zero (0)
+         */
+	for (int block_id=0; block_id < ANIC_BLOCK_MAX_BLOCKS; block_id++) {
+                if ((anic_ctx->block_status[block_id].thread_id == thread_id) &&
+                    (anic_ctx->block_status[block_id].inuse) &&
+        	    (SC_ATOMIC_GET(anic_ctx->block_status[block_id].refcount)==0)) {
+                    anic_ctx->block_status[block_id].inuse=0;
+                    anic_ctx->block_status[block_id].thread_id=0;
+           	    anic_block_add(anic_ctx->handle, thread_id, block_id, 0, anic_ctx->blocks[block_id].dma_address);
+                }
 	}
-        // no work, sleep for a bit
-        usleep(1000);
-        StatsSyncCountersIfSignalled(tv);
+        /*
+         * update buffer counts for status
+         */
+        uint32_t block_free = anic_block_get_freecount(anic_ctx->handle, 0);
+        if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
+        	anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
+        }
+	}
+       	usleep(1000);
+       	StatsSyncCountersIfSignalled(tv);
     }
 
     SCReturnInt(TM_ECODE_OK);

@@ -50,7 +50,7 @@
 // ------------------------------------------------------------------------------
 //
 // ------------------------------------------------------------------------------
-static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
+static int anic_map_blocks(ANIC_CONTEXT *ctx)
 {
     struct anic_dma_info dma_info;
 
@@ -58,7 +58,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
 #define HUGEPAGE_SIZE (2 * 1024 * 1024)
     // allocate/add 2M hugepage block buffers
     anic_block_set_blocksize(ctx->handle, ANIC_BLOCK_2MB);
-    for (uint32_t block = 0; block < block_count; block++)
+    for (uint32_t block = 0; block < ANIC_BLOCK_MAX_BLOCKS; block++)
     {
         const uint32_t shmflags = SHM_HUGETLB | IPC_CREAT | SHM_R | SHM_W;
         int shmid = shmget(IPC_PRIVATE, HUGEPAGE_SIZE, shmflags);
@@ -89,10 +89,9 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
     }
 
 #elif __FreeBSD__
-
-    // allocate/add 2M hugepage block buffers
+    // allocate and add 2048 block buffers at 2M each
     anic_block_set_blocksize(ctx->handle, ANIC_BLOCK_2MB);
-    for (uint32_t block = 0; block < block_count; block++)
+    for (uint32_t block = 0; block < ANIC_BLOCK_MAX_BLOCKS; block++)
     {
         if (anic_acquire_block(ctx->handle, &dma_info))
         {
@@ -103,7 +102,6 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx, uint32_t block_count)
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
         anic_block_add(ctx->handle, 0,block,0,ctx->blocks[block].dma_address);
     }
-
 #else
 
 #error "Unsupported OS platform"
@@ -194,7 +192,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	}
 
 	anic_set_ts_disc_mode(ctx->handle, ANIC_TS_DISC_HOST);
-	anic_map_blocks(ctx, ANIC_BLOCK_MAX_BLOCKS);
+	anic_map_blocks(ctx);
 
 	// enable rings
         uint32_t thread_id = 0;

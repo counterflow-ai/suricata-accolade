@@ -42,7 +42,7 @@
 #include <anic_api_private.h>
 
 #ifndef ANIC_BLOCK_MAX_BLOCKS
-#define ANIC_BLOCK_MAX_BLOCKS 256
+#define ANIC_BLOCK_MAX_BLOCKS 2048
 #endif
 
 #define ANIC_MAX_PORTS 4
@@ -59,14 +59,6 @@ typedef enum
   PAIR,
   RING16
 } ANIC_MODE;
-
-typedef struct _WORK_QUEUE_
-{
-  uint32_t head;
-  uint32_t tail;
-  uint32_t entryA[ANIC_BLOCK_MAX_BLOCKS + 1];
-} WORK_QUEUE;
-
 
 typedef struct _RING_STATS_
 {
@@ -104,19 +96,11 @@ typedef struct _BLOCK_MAP_
 
 typedef struct _BLOCK_STATUS_
 {
-  struct anic_blkstatus_s blkStatus;
   SC_ATOMIC_DECLARE(uint64_t, refcount);
+  uint32_t inuse;
+  uint32_t thread_id;
+  struct anic_blkstatus_s blkStatus;
 } BLOCK_STATUS __attribute__((aligned));
-
-typedef struct _BLOCK_HEADER_
-{
-  uint32_t block_size;
-  uint32_t packet_count;
-  uint32_t byte_count;
-  uint32_t reserved;
-  uint64_t first_timestamp;
-  uint64_t last_timestamp;
-} BLOCK_HEADER __attribute__((aligned));
 
 typedef struct _ANIC_CONTEXT_
 {
