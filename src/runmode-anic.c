@@ -68,37 +68,34 @@ static void *ParseAccoladeConfig(const char *mode)
 
     const char*steer_mode = NULL;
     if (ConfGet("anic.steer_mode", &steer_mode) != 1) {
+        /* default mode */
     	steer_mode="steerlb";
     }
 
     if (strncmp (mode,"single",6)==0) {
         /* all ports merged into one thead */
         anic_context->ring_mode = RING16;
-        anic_context->thread_count = 1;
         SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
     }
     else {
-	if (strncmp(steer_mode,"steer0123",9)==0) {
+        if (strncmp(steer_mode,"steer0123",9)==0) {
        	   /* one thread per port */
            anic_context->ring_mode = PORT;
-           anic_context->thread_count = 4;
            SCLogInfo("ANIC interface:%lu, mode %s:steer0123\n", anic_context->index, mode);
         } 
 	else if (strncmp(steer_mode,"steer16",7)==0) {
            /* all ports merged into one thead */
            anic_context->ring_mode = RING16;
-           anic_context->thread_count = 1;
            SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
         }
 	else if (strncmp(steer_mode,"steerlb",7)==0) {
            /* load balance mode */
            anic_context->ring_mode = LOADBALANCE;
-           anic_context->thread_count = 8;
            SCLogInfo("ANIC interface:%lu, mode %s:steerlb\n", anic_context->index, mode);
 	}
         else { // undefined
            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "invalid Accolade steer mode");
-           exit(EXIT_FAILURE);
+           return NULL;
 	}
     }
 
@@ -106,7 +103,7 @@ static void *ParseAccoladeConfig(const char *mode)
     
     if (anic_configure(anic_context) < 0) {
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "failed to initialize Accolade NIC");
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     return (void *) anic_context;
@@ -121,7 +118,7 @@ const char *RunModeAccoladeGetDefaultMode(void)
 void RunModeAccoladeRegister(void)
 {
 #ifdef HAVE_ACCOLADE
-    default_mode = "autofp";
+    default_mode = "workers";
 
     RunModeRegisterNewRunMode(RUNMODE_ANIC, "autofp",
         "Multi threaded ANIC mode.  Packets from "

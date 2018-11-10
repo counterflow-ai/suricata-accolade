@@ -65,13 +65,13 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
         if (shmid == -1)
         {
             SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"shmget() failure error %u %s\n", errno, strerror(errno));
-            exit(1);
+            return -1;
         }
         void *v_p = shmat(shmid, NULL, SHM_RND);
         if (v_p == (void *)-1)
         {
             SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"shmat() failure error %u %s\n", errno, strerror(errno));
-            exit(1);
+            return -1;
         }
         shmctl(shmid, IPC_RMID, NULL);
         memset(v_p, 0xff, 256); // force creation of PTE and verify access
@@ -81,7 +81,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
         if (anic_map_dma(ctx->handle, &dma_info))
         {
             SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"anic_map_dma() failed\n");
-            exit(1);
+            return -1;
         }
         ctx->blocks[block].virtual_address = (uint8_t *)v_p;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
@@ -96,11 +96,11 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
         if (anic_acquire_block(ctx->handle, &dma_info))
         {
             SCLogError(SC_ERR_ACCOLADE_INIT_FAILED,"anic_acquire_block() failed\n");
-            exit(1);
+            return -1;
         }
         ctx->blocks[block].virtual_address = (uint8_t *)dma_info.userVirtualAddress;
         ctx->blocks[block].dma_address = dma_info.dmaPhysicalAddress;
-        anic_block_add(ctx->handle, 0,block,0,ctx->blocks[block].dma_address);
+        anic_block_add(ctx->handle,0,block,0,ctx->blocks[block].dma_address);
     }
 #else
 
@@ -192,7 +192,11 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	}
 
 	anic_set_ts_disc_mode(ctx->handle, ANIC_TS_DISC_HOST);
-	anic_map_blocks(ctx);
+	
+	if (anic_map_blocks(ctx) < 0) {
+		anic_close(ctx->handle);
+		return -1;
+	}
 
 	// enable rings
         uint32_t thread_id = 0;
@@ -214,7 +218,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		anic_port_ena_disa(ctx->handle, port, 1);
 	}
 
-        SCLogInfo("Accolade Network Interface Card (ANIC) is ready");
+    SCLogInfo("Accolade Network Interface Card (ANIC) is ready");
 	return 0;
 }
 
