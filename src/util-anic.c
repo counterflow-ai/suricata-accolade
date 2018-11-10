@@ -121,22 +121,21 @@ static int anic_cpu_count (void)
 #ifdef __linux__
 	numCores = sysconf(_SC_NPROCESSORS_ONLN);
 #elif __FreeBSD__
-	int mib[4];
-	int len = sizeof(numCores); 
+#include <sys/types.h>
+#include <sys/sysctl.h>
+        int mib[4];
+        size_t len = sizeof(numCores);
 
-	/* set the mib for hw.ncpu */
-	mib[0] = CTL_HW;
-	mib[1] = HW_AVAILCPU;  // alternatively, try HW_NCPU;
+        /* set the mib for hw.ncpu */
+        mib[0] = CTL_HW;
+        mib[1] = HW_NCPU;
 
-	/* get the number of cores from the system */
-	sysctl(mib, 2, &numCores, &len, NULL, 0);
+        /* get the number of cores from the system */
+        sysctl(mib, 2, &numCores, &len, NULL, 0);
 
-	if (numCores < 1)  {
-    	mib[1] = HW_NCPU;
-    	sysctl(mib, 2, &numCores, &len, NULL, 0);
-    	if (numCores < 1)
-        	numCores = 1;
-	}
+        if (numCores < 1)  {
+                numCores = 1;
+        }
 
 #else
 
