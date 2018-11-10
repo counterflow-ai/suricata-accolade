@@ -115,6 +115,41 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
  *
  * ---------------------------------------------------------------------------------------
  */
+static int anic_cpu_count (void)
+{
+	int numCores;
+#ifdef __linux__
+	numCores = sysconf(_SC_NPROCESSORS_ONLN);
+#elif __FreeBSD__
+	int mib[4];
+	int len = sizeof(numCores); 
+
+	/* set the mib for hw.ncpu */
+	mib[0] = CTL_HW;
+	mib[1] = HW_AVAILCPU;  // alternatively, try HW_NCPU;
+
+	/* get the number of cores from the system */
+	sysctl(mib, 2, &numCores, &len, NULL, 0);
+
+	if (numCores < 1)  {
+    	mib[1] = HW_NCPU;
+    	sysctl(mib, 2, &numCores, &len, NULL, 0);
+    	if (numCores < 1)
+        	numCores = 1;
+	}
+
+#else
+
+#error "Unsupported OS platform"
+
+#endif
+	return numCores;
+}
+/*
+ * ---------------------------------------------------------------------------------------
+ *
+ * ---------------------------------------------------------------------------------------
+ */
 int anic_configure(ANIC_CONTEXT *ctx)
 {
 	// Open anic device
@@ -165,7 +200,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		case LOADBALANCE:
 		default:
         	/* load balance mode */
-        	ctx->ring_count = 8; 
+        	ctx->ring_count = (anic_cpu_count() / 2);
         	ctx->ring_mask = (0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
         	ctx->ring_count += 1; // add ring 63
         	anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
@@ -192,7 +227,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	}
 
 	anic_set_ts_disc_mode(ctx->handle, ANIC_TS_DISC_HOST);
-	
+
 	if (anic_map_blocks(ctx) < 0) {
 		anic_close(ctx->handle);
 		return -1;
