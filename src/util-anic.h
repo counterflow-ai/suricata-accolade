@@ -60,19 +60,6 @@ typedef enum
   RING16
 } ANIC_MODE;
 
-typedef struct _RING_STATS_
-{
-  struct
-  {
-    uint64_t packets;
-    uint64_t bytes;
-    uint64_t packet_errors;
-    uint64_t timestamp_errors;
-    uint64_t validation_errors;
-    uint64_t pad[3]; // use full cache lines
-  } ring[ANIC_MAX_NUMBER_OF_RINGS];
-} RING_STATS __attribute__((aligned));
-
 typedef struct _THREAD_STATS_
 {
   struct
@@ -114,7 +101,6 @@ typedef struct _ANIC_CONTEXT_
   uint64_t ring_mask;
   ANIC_MODE ring_mode;
 
-  RING_STATS ring_stats;
   THREAD_STATS thread_stats;
   uint32_t thread_ring[ANIC_MAX_NUMBER_OF_RINGS];
   BLOCK_MAP blocks[ANIC_BLOCK_MAX_BLOCKS];
