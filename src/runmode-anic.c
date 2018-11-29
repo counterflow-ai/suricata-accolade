@@ -117,11 +117,6 @@ static void *ParseAccoladeConfig(const char *mode)
             return NULL;
         }
     }
-
-    if (anic_context->enable_bypass && (strncmp(mode, "autofp", 6) == 0))
-    {
-        SCLogError(SC_ERR_RUNMODE, "ANIC bypass is not supported in autofp mode");
-    }
     
     anic_context->reset = 1;
 

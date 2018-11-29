@@ -214,7 +214,7 @@ static int AccoladeBypassCallback(Packet *p)
 
     ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
 
-    anic_flow_filter(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.flow_id, ANIC_FLOW_FLAG_SHUNT_SET | ANIC_FLOW_FLAG_TRACE_SET);
+    anic_flow_filter(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.flow_id, ANIC_FLOW_FLAG_SHUNT_SET);
 
     SCLogDebug("Bypass set for flow ID = %u", p->anic_v.flow_id);
     return 1;
@@ -262,7 +262,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 #ifndef ANIC_DISABLE_BYPASS
         if (anic_ctx->enable_bypass) {
             
-            /* packet payload */
+            /* flow descriptor with packet payload */
             if (descriptor->type == 4) {
 
                 p = PacketGetFromQueueOrAlloc();
@@ -280,11 +280,13 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 p->BypassPacketsFlow = AccoladeBypassCallback;
                 p->anic_v.flow_id = flow_descriptor->flowid;
             }
+            /* ignore all other flow descriptor types */
             else continue;
         }
         else
 #endif
         if (descriptor->type == ANIC_DESCRIPTOR_RX_PACKET_DATA) {
+            
             p = PacketGetFromQueueOrAlloc();
             if (unlikely(p == NULL)) {
                 SCReturnInt(TM_ECODE_FAILED);
@@ -297,7 +299,10 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
             p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
         }
         /* unrecognized descriptor type; unlikely case */
-        else continue;
+        else {
+            SCLogError(SC_ERR_ACCOLADE_NOSUPPORT, "unsupported descriptor type: %i", descriptor->type);
+            SCReturnInt(TM_ECODE_FAILED);
+        }
 
         p->datalink = LINKTYPE_ETHERNET;
         p->ReleasePacket = AccoladeReleasePacket;
@@ -353,17 +358,8 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
     /* This just keeps the startup output more orderly. */
     usleep(200000 * atv->thread_id);
 
-#ifdef HAVE_PF_RING_FLOW_OFFLOAD
-            if (ptv->flags & PFRING_FLAGS_BYPASS) {
-                /* pkt hash contains the flow id in this configuration */
-                p->pfring_v.flow_id = hdr.extended_hdr.pkt_hash;
-                p->pfring_v.ptv = ptv;
-                p->BypassPacketsFlow = PfringBypassCallback;
-            }
-#endif
-
     SCLogInfo("Accolade Packet Loop Started -  thread: %u ", thread_id);
-    fprintf(stderr,"%s: Accolade Packet Loop Started -  thread: %u\n", __FUNCTION__, thread_id);
+    //fprintf(stderr,"%s: Accolade Packet Loop Started -  thread: %u\n", __FUNCTION__, thread_id);
 
     atv->slot = s->slot_next;
     while (!(suricata_ctl_flags & SURICATA_STOP)) {
@@ -406,7 +402,7 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
                 }
 	        }
             /*
-             * update buffer counts for status
+             * update buffer counts to monitor queue lengths of free buffers
              */
             uint32_t block_free = anic_block_get_freecount(anic_ctx->handle, 0);
             if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
