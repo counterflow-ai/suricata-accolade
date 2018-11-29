@@ -82,6 +82,8 @@ typedef struct AccoladeThreadVars_ {
     ANIC_CONTEXT *anic_context;
     uint32_t ring_id;
     int32_t thread_id;
+    uint32_t flow_id;
+    uint32_t pad;
     ThreadVars *tv;
     TmSlot *slot;
 } AccoladeThreadVars;
@@ -193,6 +195,33 @@ static void AccoladeReleasePacket(struct Packet_ *p)
     PacketFreeOrRelease(p);
 }
 
+#ifndef ANIC_DISABLE_BYPASS
+// ------------------------------------------------------------------------------
+//
+// ------------------------------------------------------------------------------
+
+static int AccoladeBypassCallback(Packet *p)
+{
+    /* Only bypass TCP and UDP */
+    if (!(PKT_IS_TCP(p) || PKT_IS_UDP(p))) {
+        return 0;
+    }
+
+    /* Bypassing tunneled packets is currently not supported */
+    if (IS_TUNNEL_PKT(p)) {
+        return 0;
+    }
+
+    ANIC_CONTEXT *anic_ctx = p->anic_v.anic_context;
+
+    anic_flow_filter(anic_ctx->handle, p->anic_v.thread_id, p->anic_v.flow_id, ANIC_FLOW_FLAG_SHUNT_SET | ANIC_FLOW_FLAG_TRACE_SET);
+
+    SCLogDebug("Bypass set for flow ID = %u", p->anic_v.flow_id);
+    return 1;
+}
+
+#endif
+
 // ------------------------------------------------------------------------------
 //
 // ------------------------------------------------------------------------------
@@ -215,34 +244,67 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
         // point to the next descriptor
         next_buffer += (descriptor->length + 7) & ~7;
 
-#if 1
+#ifdef DEBUG
         // Packet header checks can be useful for basic application sanity but as noted below,
-        // they're not universially applicable so plan accordingly.
-        assert (descriptor->type == ANIC_DESCRIPTOR_RX_PACKET_DATA);
-        assert (descriptor->anyerr==0);
+        // they're not universially applicable so plan accordingl
         assert(descriptor->port < ANIC_MAX_PORTS);
         assert(descriptor->length <= 14348);
         assert(descriptor->origlength <= 14332);
         assert(descriptor->length >= 76);
         assert(descriptor->origlength >= 60);
-        assert(descriptor->length - descriptor->origlength == 16);
 #endif
+ 
+        Packet *p = NULL;
+        uint32_t error = 0;
+        uint8_t *packet = NULL;
+        uint32_t packet_length = 0;
+    
+#ifndef ANIC_DISABLE_BYPASS
+        if (anic_ctx->enable_bypass) {
+            
+            /* packet payload */
+            if (descriptor->type == 4) {
 
-        uint8_t *packet = (uint8_t *)&descriptor[1];
-        uint32_t packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
+                p = PacketGetFromQueueOrAlloc();
+                if (unlikely(p == NULL)) {
+                    SCReturnInt(TM_ECODE_FAILED);
+                }
 
-        Packet *p = PacketGetFromQueueOrAlloc();
-        if (unlikely(p == NULL)) {
-            SCReturnInt(TM_ECODE_FAILED);
+                struct anic_rx_type4_s *flow_descriptor = (struct anic_rx_type4_s *)descriptor;
+                error = flow_descriptor->errorflag;
+                packet = (uint8_t *)&flow_descriptor[1];
+                packet_length = flow_descriptor->length - sizeof(struct anic_rx_type4_s);
+
+                p->ts.tv_sec = flow_descriptor->timestamp >> 32;
+                p->ts.tv_usec = ((flow_descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
+                p->BypassPacketsFlow = AccoladeBypassCallback;
+                p->anic_v.flow_id = flow_descriptor->flowid;
+            }
+            else continue;
         }
+        else
+#endif
+        if (descriptor->type == ANIC_DESCRIPTOR_RX_PACKET_DATA) {
+            p = PacketGetFromQueueOrAlloc();
+            if (unlikely(p == NULL)) {
+                SCReturnInt(TM_ECODE_FAILED);
+            }
+            
+            error = descriptor->anyerr;
+            packet = (uint8_t *)&descriptor[1];
+            packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
+            p->ts.tv_sec = descriptor->timestamp >> 32;
+            p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
+        }
+        /* unrecognized descriptor type; unlikely case */
+        else continue;
 
+        p->datalink = LINKTYPE_ETHERNET;
         p->ReleasePacket = AccoladeReleasePacket;
         p->anic_v.anic_context = anic_ctx;
         p->anic_v.block_id = block_id;
-        p->datalink = LINKTYPE_ETHERNET;
-        p->ts.tv_sec = descriptor->timestamp >> 32;
-        p->ts.tv_usec = ((descriptor->timestamp & 0xffffffff) * 1000000) >> 32;
-
+        p->anic_v.thread_id = atv->thread_id;
+     
         if (unlikely(PacketSetData(p, (uint8_t *)packet, packet_length))) {
             TmqhOutputPacketpool(atv->tv, p);
             SCReturnInt(TM_ECODE_FAILED);
@@ -254,8 +316,8 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
         }
 
         packets++;
-        bytes += (descriptor->origlength);
-        if (descriptor->anyerr) {
+        bytes += packet_length;
+        if (error) {
             packet_errors++;
         }
     }
@@ -271,6 +333,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 
     return 0;
 }
+
 
 // ------------------------------------------------------------------------------
 //
@@ -289,6 +352,15 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
 
     /* This just keeps the startup output more orderly. */
     usleep(200000 * atv->thread_id);
+
+#ifdef HAVE_PF_RING_FLOW_OFFLOAD
+            if (ptv->flags & PFRING_FLAGS_BYPASS) {
+                /* pkt hash contains the flow id in this configuration */
+                p->pfring_v.flow_id = hdr.extended_hdr.pkt_hash;
+                p->pfring_v.ptv = ptv;
+                p->BypassPacketsFlow = PfringBypassCallback;
+            }
+#endif
 
     SCLogInfo("Accolade Packet Loop Started -  thread: %u ", thread_id);
     fprintf(stderr,"%s: Accolade Packet Loop Started -  thread: %u\n", __FUNCTION__, thread_id);

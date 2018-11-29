@@ -39,7 +39,9 @@ void TmModuleAccoladeDecodeRegister (void);
 typedef struct AccoladePacketVars_
 {
     int32_t thread_id;
+    uint32_t flow_id;
     uint32_t block_id;
+    uint32_t pad;
     ANIC_CONTEXT *anic_context;
 } AccoladePacketVars;
 

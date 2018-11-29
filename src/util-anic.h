@@ -39,6 +39,12 @@
 #define BLOCK_MODE_ENA 
 
 #include <anic_api.h>
+
+/* Include ANIC bypass feature by default */
+#ifndef ANIC_DISABLE_BYPASS
+#include <anic_api_flow.h>
+#endif
+
 #include <anic_api_private.h>
 
 #ifndef ANIC_BLOCK_MAX_BLOCKS
@@ -95,9 +101,11 @@ typedef struct _ANIC_CONTEXT_
   int64_t index;
   int16_t reset;
   int16_t slice;
-  uint32_t ring_count;
+  int32_t ring_count;
   int32_t port_count;
-  uint32_t thread_count;
+  int32_t enable_bypass;
+  int32_t flow_timeout;
+  int32_t thread_count;
   uint64_t ring_mask;
   ANIC_MODE ring_mode;
 
@@ -108,7 +116,6 @@ typedef struct _ANIC_CONTEXT_
 } ANIC_CONTEXT __attribute__((aligned));
 
 int anic_configure(ANIC_CONTEXT *ctx);
-void anic_enable_ports (ANIC_CONTEXT *ctx);
 
 #endif
 #endif
