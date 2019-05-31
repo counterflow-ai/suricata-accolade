@@ -62,10 +62,22 @@ static void *ParseAccoladeConfig(const char *mode)
     }
     memset(anic_context, 0, sizeof(ANIC_CONTEXT));
 
+    
+    if (ConfGetInt("anic.max_blocks", &anic_context->max_blocks) != 1)
+    {
+        anic_context->max_blocks = ANIC_DEFAULT_BLOCKS;
+    }
+
+    if (anic_context->max_blocks > ANIC_MAX_BLOCKS)
+    {
+          SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "max_blocks cannot exceed %i", ANIC_MAX_BLOCKS);
+    }
+
     if (ConfGetInt("anic.interface", &anic_context->index) != 1)
     {
         anic_context->index = 0;
     }
+
 
     if (ConfGetBool("anic.enable_bypass", &anic_context->enable_bypass) != 1)
     {

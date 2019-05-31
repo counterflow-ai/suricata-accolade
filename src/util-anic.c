@@ -57,7 +57,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
 #define HUGEPAGE_SIZE (2 * 1024 * 1024)
 	// allocate/add 2M hugepage block buffers
 	anic_block_set_blocksize(ctx->handle, ANIC_BLOCK_2MB);
-	for (uint32_t block = 0; block < ANIC_BLOCK_MAX_BLOCKS; block++)
+	for (uint32_t block = 0; block < ctx->max_blocks; block++)
 	{
 		const uint32_t shmflags = SHM_HUGETLB | IPC_CREAT | SHM_R | SHM_W;
 		int shmid = shmget(IPC_PRIVATE, HUGEPAGE_SIZE, shmflags);
@@ -90,7 +90,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
 #elif __FreeBSD__
 	// allocate and add 2048 block buffers at 2M each
 	anic_block_set_blocksize(ctx->handle, ANIC_BLOCK_2MB);
-	for (uint32_t block = 0; block < ANIC_BLOCK_MAX_BLOCKS; block++)
+	for (uint32_t block = 0; block < ctx->max_blocks; block++)
 	{
 		if (anic_acquire_block(ctx->handle, &dma_info))
 		{

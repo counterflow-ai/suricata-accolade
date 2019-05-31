@@ -47,9 +47,11 @@
 
 #include <anic_api_private.h>
 
-#ifndef ANIC_BLOCK_MAX_BLOCKS
-#define ANIC_BLOCK_MAX_BLOCKS 2048
+#ifndef ANIC_MAX_BLOCKS
+#define ANIC_MAX_BLOCKS 2047
 #endif
+
+#define ANIC_DEFAULT_BLOCKS 1024
 
 #define ANIC_MAX_PORTS 4
 #define ANIC_DEFAULT_BLOCK_SIZE (0x200000)
@@ -106,7 +108,10 @@ typedef struct _ANIC_CONTEXT_
   int32_t enable_bypass;
   int32_t flow_timeout;
   int32_t thread_count;
+  int64_t max_blocks;
   uint64_t ring_mask;
+
+
   ANIC_MODE ring_mode;
 
   THREAD_STATS thread_stats;
