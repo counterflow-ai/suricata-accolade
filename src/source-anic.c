@@ -392,7 +392,7 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
          * and add back to the ANIC pool. Note, that a buffer is consider done when
          * when the reference count is zero (0)
          */
-	        for (int block_id=0; block_id < ANIC_BLOCK_MAX_BLOCKS; block_id++) {
+	        for (int block_id=0; block_id < anic_ctx->max_blocks; block_id++) {
                 if ((anic_ctx->block_status[block_id].thread_id == thread_id) &&
                     (anic_ctx->block_status[block_id].inuse) &&
         	        (SC_ATOMIC_GET(anic_ctx->block_status[block_id].refcount)==0)) {
