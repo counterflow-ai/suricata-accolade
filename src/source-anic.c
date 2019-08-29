@@ -32,6 +32,7 @@
 #include "tm-queuehandlers.h"
 #include "tm-threads.h"
 #include "tm-modules.h"
+#include "util-device.h"
 #include "util-privs.h"
 #include "tmqh-packetpool.h"
 #include "source-anic.h"
@@ -85,6 +86,7 @@ typedef struct AccoladeThreadVars_ {
     uint32_t flow_id;
     uint32_t pad;
     ThreadVars *tv;
+    LiveDevice *livedev;
     TmSlot *slot;
 
     /* counters */
@@ -176,6 +178,7 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
+    atv->livedev = LiveGetDevice("anic");
     atv->thread_id = (SC_ATOMIC_ADD(g_thread_count, 1)-1);
     atv->ring_id = anic_context->thread_ring [atv->thread_id];
 
@@ -340,6 +343,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     atv->packet_errors += packet_errors;
     atv->flow_errors += flow_errors;
     StatsAddUI64(atv->tv, atv->capture_kernel_packets, (uint64_t)packets);
+    SC_ATOMIC_ADD(atv->livedev->pkts, packets);
     StatsSyncCountersIfSignalled(atv->tv);
 
     return 0;
@@ -423,8 +427,11 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
     AccoladeThreadVars *atv = (AccoladeThreadVars *) data;
     ANIC_CONTEXT *anic_context = atv->anic_context;
 
-    /* on thread 0 only, dump the port stats */
+    /* on thread 0 only, dump the port stats and set the drops/malfs in the live device */
     if (atv->thread_id==0) {
+        uint64_t drops = 0L;
+        uint64_t malfs = 0L;
+        uint64_t sum = 0L;
         for (int port=0; port < anic_context->port_count; port++) {
           struct anic_rx_xge_counts counts;
           anic_port_get_counts(anic_context->handle, port, 0, &counts);
@@ -434,7 +441,11 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
                     counts.rsrcs,
                     counts.bytes,
                     counts.malfs);
+            drops += counts.rsrcs;  
+            malfs += counts.malfs;  
         }
+        SC_ATOMIC_SET(atv-livedev->drop, drops);
+        SC_ATOMIC_SET(atv-livedev->invalid_checksum, malfs);
     }
     /* thread stats */
     SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
