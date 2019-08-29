@@ -273,10 +273,9 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	} 
 #endif
 
-	/* Clear the RMON and PKIF counters, then enable port */
+	/* clear PKIF counters and enable port */
 	for (int port = 0; port < (ctx->port_count); port++)
 	{
-		anic_get_rx_rmon_counts(ctx->handle, port, 1, NULL);
 		anic_port_get_counts(ctx->handle, port, 1, NULL);
 		anic_port_ena_disa(ctx->handle, port, 1);
 	}

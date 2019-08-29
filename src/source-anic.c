@@ -183,12 +183,6 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     atv->capture_kernel_packets = StatsRegisterCounter("capture.kernel_packets", atv->tv);
     atv->capture_kernel_drops = StatsRegisterCounter("capture.kernel_drops", atv->tv);
 
-    struct rx_rmon_counts_s stats;
-    if (atv->thread_id < anic_context->port_count){
-        /* reset rmon counters */
-        anic_get_rx_rmon_counts (anic_context->handle, atv->thread_id, 1,  &stats);
-        anic_port_ena_disa(anic_context->handle, atv->thread_id, 1);
-    }
     SCLogInfo("Started processing packets for ACCOLADE thread: %u", atv->thread_id);
 
     *data = (void *) atv;
@@ -428,27 +422,20 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
 {
     AccoladeThreadVars *atv = (AccoladeThreadVars *) data;
     ANIC_CONTEXT *anic_context = atv->anic_context;
-    /*
-     * Thread 0 signals to print per port stats
-     *  
-     */
-    if (atv->thread_id==0){
+
+    /* on thread 0 only, dump the port stats */
+    if (atv->thread_id==0) {
         for (int port=0; port < anic_context->port_count; port++) {
-            struct rx_rmon_counts_s stats;
-            anic_get_rx_rmon_counts (anic_context->handle, port, 0,  &stats);
-
-            double percent = 0;
-            if (stats.rsrc_count > 0) {
-                percent = (((double)stats.rsrc_count)
-                    / (stats.total_pkts + stats.rsrc_count)) * 100;
-            }
-
-            SCLogInfo("port%lu - pkts: %lu; drop: %lu (%5.2f%%); bytes: %lu",
-                 (uint64_t) port, stats.total_pkts,
-                 stats.rsrc_count, percent, stats.total_bytes);
+          struct anic_rx_xge_counts counts;
+          anic_port_get_counts(anic_context->handle, port, 0, &counts);
+          SCLogPerf("(port %u) - Packets %" PRIu64 ", rsrcs %" PRIu64 ", bytes %" PRIu64 ", malfs %" PRIu64 "",
+                    port,
+                    counts.packets,
+                    counts.rsrcs,
+                    counts.bytes,
+                    counts.malfs);
         }
     }
-
     /* thread stats */
     SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
               atv->thread_id,
