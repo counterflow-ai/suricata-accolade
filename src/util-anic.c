@@ -205,7 +205,6 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		/* load balance mode */
 		ctx->ring_count = (anic_cpu_count() / 2);
 		ctx->ring_mask = (0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
-		ctx->ring_count += 1; // add ring 63
 		anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
 		anic_pduproc_dma_pktseq(ctx->handle, 1);
 		if (anic_setup_rings_largelut(ctx->handle, ctx->ring_count, 0x01, NULL))
@@ -217,6 +216,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 				return -1;
 			}
 		}
+		ctx->ring_count += 1; // ring 63
 		break;
 	}
 	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
