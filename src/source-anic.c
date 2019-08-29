@@ -1,4 +1,4 @@
-/n* Copyright (C) 2018 Open Information Security Foundation
+/* Copyright (C) 2018 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -243,9 +243,6 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     uint32_t bytes = 0;
     uint32_t packet_errors = 0;
     uint32_t flow_errors = 0;
-    uint32_t timestamp_errors = 0;
-    uint32_t validation_errors = 0;
-    const uint32_t thread_id = atv->thread_id;
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *next_buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
@@ -302,7 +299,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 SCReturnInt(TM_ECODE_FAILED);
             }
             
-            packet_errors += flow_descriptor->anyerr ? 1 : 0;
+            packet_errors += descriptor->anyerr ? 1 : 0;
             packet = (uint8_t *)&descriptor[1];
             packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
             p->ts.tv_sec = descriptor->timestamp >> 32;
@@ -332,9 +329,6 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 
         packets++;
         bytes += packet_length;
-        if (error) {
-            packet_errors++;
-        }
     }
 
     /* update stats counters */
@@ -431,7 +425,6 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
     if (atv->thread_id==0) {
         uint64_t drops = 0L;
         uint64_t malfs = 0L;
-        uint64_t sum = 0L;
         for (int port=0; port < anic_context->port_count; port++) {
           struct anic_rx_xge_counts counts;
           anic_port_get_counts(anic_context->handle, port, 0, &counts);
@@ -444,15 +437,15 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
             drops += counts.rsrcs;  
             malfs += counts.malfs;  
         }
-        SC_ATOMIC_SET(atv-livedev->drop, drops);
-        SC_ATOMIC_SET(atv-livedev->invalid_checksum, malfs);
+        SC_ATOMIC_SET(atv->livedev->drop, drops);
+        SC_ATOMIC_SET(atv->livedev->invalid_checksums, malfs);
     }
     /* thread stats */
     SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
               atv->thread_id,
               atv->packets,
               atv->bytes,
-              atv->packet_errors;
+              atv->packet_errors,
               atv->flow_errors);
 }
 
