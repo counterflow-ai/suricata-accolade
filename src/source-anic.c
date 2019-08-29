@@ -86,6 +86,10 @@ typedef struct AccoladeThreadVars_ {
     uint32_t pad;
     ThreadVars *tv;
     TmSlot *slot;
+
+    /* counters */
+    uint16_t capture_kernel_packets;
+    uint16_t capture_kernel_drops;
 } AccoladeThreadVars;
 
 TmEcode AccoladeThreadInit(ThreadVars *, const void *, void **);
@@ -170,6 +174,10 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     atv->tv = tv;
     atv->thread_id = (SC_ATOMIC_ADD(g_thread_count, 1)-1);
     atv->ring_id = anic_context->thread_ring [atv->thread_id];
+
+    /* basic counters */
+    atv->capture_kernel_packets = StatsRegisterCounter("capture.kernel_packets", atv->tv);
+    atv->capture_kernel_drops = StatsRegisterCounter("capture.kernel_drops", atv->tv);
 
     struct rx_rmon_counts_s stats;
     if (atv->thread_id < anic_context->port_count){
@@ -327,6 +335,10 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
         }
     }
 
+    /* update stats counters */
+    StatsAddUI64(atv->tv, atv->capture_kernel_packets, (uint64_t)packets);
+    StatsSyncCountersIfSignalled(atv->tv);
+
     /*
      * Keep running stats on a per thread basis
      */
@@ -410,7 +422,6 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
             }
        	    usleep(1000);
         }
-       	StatsSyncCountersIfSignalled(tv);
     }
 
     SCReturnInt(TM_ECODE_OK);
