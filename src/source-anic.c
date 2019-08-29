@@ -1,4 +1,4 @@
-/* Copyright (C) 2018 Open Information Security Foundation
+/n* Copyright (C) 2018 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -88,6 +88,10 @@ typedef struct AccoladeThreadVars_ {
     TmSlot *slot;
 
     /* counters */
+    uint64_t packets;
+    uint64_t bytes;
+    uint64_t packet_errors;
+    uint64_t flow_errors;
     uint16_t capture_kernel_packets;
     uint16_t capture_kernel_drops;
 } AccoladeThreadVars;
@@ -241,6 +245,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     uint32_t packets = 0;
     uint32_t bytes = 0;
     uint32_t packet_errors = 0;
+    uint32_t flow_errors = 0;
     uint32_t timestamp_errors = 0;
     uint32_t validation_errors = 0;
     const uint32_t thread_id = atv->thread_id;
@@ -263,7 +268,6 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 #endif
  
         Packet *p = NULL;
-        uint32_t error = 0;
         uint8_t *packet = NULL;
         uint32_t packet_length = 0;
     
@@ -279,7 +283,8 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 }
 
                 struct anic_rx_type4_s *flow_descriptor = (struct anic_rx_type4_s *)descriptor;
-                error = flow_descriptor->errorflag;
+                packet_errors += flow_descriptor->errorflag ? 1 : 0;
+                flow_errors += flow_descriptor->flag_error ? 1 : 0;
                 packet = (uint8_t *)&flow_descriptor[1];
                 packet_length = flow_descriptor->length - sizeof(struct anic_rx_type4_s);
 
@@ -300,7 +305,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 SCReturnInt(TM_ECODE_FAILED);
             }
             
-            error = descriptor->anyerr;
+            packet_errors += flow_descriptor->anyerr ? 1 : 0;
             packet = (uint8_t *)&descriptor[1];
             packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
             p->ts.tv_sec = descriptor->timestamp >> 32;
@@ -336,17 +341,12 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     }
 
     /* update stats counters */
+    atv->packets += packets;
+    atv->bytes += bytes;
+    atv->packet_errors += packet_errors;
+    atv->flow_errors += flow_errors;
     StatsAddUI64(atv->tv, atv->capture_kernel_packets, (uint64_t)packets);
     StatsSyncCountersIfSignalled(atv->tv);
-
-    /*
-     * Keep running stats on a per thread basis
-     */
-    anic_ctx->thread_stats.thread[thread_id].packets += packets;
-    anic_ctx->thread_stats.thread[thread_id].bytes += bytes;
-    anic_ctx->thread_stats.thread[thread_id].packet_errors += packet_errors;
-    anic_ctx->thread_stats.thread[thread_id].timestamp_errors += timestamp_errors;
-    anic_ctx->thread_stats.thread[thread_id].validation_errors += validation_errors;
 
     return 0;
 }
@@ -381,9 +381,6 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
 
         memset (&blkstatus, 0, sizeof(blkstatus));
         uint32_t blkcnt = anic_block_get(anic_ctx->handle, thread_id, ring_id, &blkstatus);
-        if (blkcnt > anic_ctx->thread_stats.thread[thread_id].blkc_max) {
-        	anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
-        }
         if (blkcnt > 0) {
         	uint32_t block_id = blkstatus.blkid;
             /*patch in the virtual address of the block base */
@@ -413,13 +410,6 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
            	        anic_block_add(anic_ctx->handle, thread_id, block_id, 0, anic_ctx->blocks[block_id].dma_address);
                 }
 	        }
-            /*
-             * update buffer counts to monitor queue lengths of free buffers
-             */
-            uint32_t block_free = anic_block_get_freecount(anic_ctx->handle, 0);
-            if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
-        	    anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
-            }
        	    usleep(1000);
         }
     }
@@ -458,17 +448,14 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
                  stats.rsrc_count, percent, stats.total_bytes);
         }
     }
-    /*
-     * Print per thread stats
-     */
-    SCLogInfo("thread%lu - pkts: %lu; bytes: %lu",
-                 (uint64_t) atv->thread_id, 
-                 anic_context->thread_stats.thread[atv->thread_id].packets,
-                 anic_context->thread_stats.thread[atv->thread_id].bytes);
 
-    //anic_context->thread_stats.thread[thread_id].packet_errors;
-    //anic_context->thread_stats.thread[thread_id].timestamp_errors;
-    //anic_context->thread_stats.thread[thread_id].validation_errors;    
+    /* thread stats */
+    SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
+              atv->thread_id,
+              atv->packets,
+              atv->bytes,
+              atv->packet_errors;
+              atv->flow_errors);
 }
 
 /**
