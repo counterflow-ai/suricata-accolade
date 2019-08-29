@@ -32,6 +32,7 @@
 #include "tm-queuehandlers.h"
 #include "tm-threads.h"
 #include "tm-modules.h"
+#include "util-device.h"
 #include "util-privs.h"
 #include "tmqh-packetpool.h"
 #include "source-anic.h"
@@ -85,7 +86,16 @@ typedef struct AccoladeThreadVars_ {
     uint32_t flow_id;
     uint32_t pad;
     ThreadVars *tv;
+    LiveDevice *livedev;
     TmSlot *slot;
+
+    /* counters */
+    uint64_t packets;
+    uint64_t bytes;
+    uint64_t packet_errors;
+    uint64_t flow_errors;
+    uint16_t capture_kernel_packets;
+    uint16_t capture_kernel_drops;
 } AccoladeThreadVars;
 
 TmEcode AccoladeThreadInit(ThreadVars *, const void *, void **);
@@ -168,15 +178,14 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     memset(atv, 0, sizeof (AccoladeThreadVars));
     atv->anic_context = anic_context;
     atv->tv = tv;
+    atv->livedev = LiveGetDevice("anic");
     atv->thread_id = (SC_ATOMIC_ADD(g_thread_count, 1)-1);
     atv->ring_id = anic_context->thread_ring [atv->thread_id];
 
-    struct rx_rmon_counts_s stats;
-    if (atv->thread_id < anic_context->port_count){
-        /* reset rmon counters */
-        anic_get_rx_rmon_counts (anic_context->handle, atv->thread_id, 1,  &stats);
-        anic_port_ena_disa(anic_context->handle, atv->thread_id, 1);
-    }
+    /* basic counters */
+    atv->capture_kernel_packets = StatsRegisterCounter("capture.kernel_packets", atv->tv);
+    atv->capture_kernel_drops = StatsRegisterCounter("capture.kernel_drops", atv->tv);
+
     SCLogInfo("Started processing packets for ACCOLADE thread: %u", atv->thread_id);
 
     *data = (void *) atv;
@@ -233,9 +242,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     uint32_t packets = 0;
     uint32_t bytes = 0;
     uint32_t packet_errors = 0;
-    uint32_t timestamp_errors = 0;
-    uint32_t validation_errors = 0;
-    const uint32_t thread_id = atv->thread_id;
+    uint32_t flow_errors = 0;
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *next_buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
@@ -255,7 +262,6 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 #endif
  
         Packet *p = NULL;
-        uint32_t error = 0;
         uint8_t *packet = NULL;
         uint32_t packet_length = 0;
     
@@ -271,7 +277,8 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 }
 
                 struct anic_rx_type4_s *flow_descriptor = (struct anic_rx_type4_s *)descriptor;
-                error = flow_descriptor->errorflag;
+                packet_errors += flow_descriptor->errorflag ? 1 : 0;
+                flow_errors += flow_descriptor->flag_error ? 1 : 0;
                 packet = (uint8_t *)&flow_descriptor[1];
                 packet_length = flow_descriptor->length - sizeof(struct anic_rx_type4_s);
 
@@ -292,7 +299,7 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
                 SCReturnInt(TM_ECODE_FAILED);
             }
             
-            error = descriptor->anyerr;
+            packet_errors += descriptor->anyerr ? 1 : 0;
             packet = (uint8_t *)&descriptor[1];
             packet_length = descriptor->length - sizeof(struct anic_descriptor_rx_packet_data); 
             p->ts.tv_sec = descriptor->timestamp >> 32;
@@ -322,19 +329,16 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 
         packets++;
         bytes += packet_length;
-        if (error) {
-            packet_errors++;
-        }
     }
 
-    /*
-     * Keep running stats on a per thread basis
-     */
-    anic_ctx->thread_stats.thread[thread_id].packets += packets;
-    anic_ctx->thread_stats.thread[thread_id].bytes += bytes;
-    anic_ctx->thread_stats.thread[thread_id].packet_errors += packet_errors;
-    anic_ctx->thread_stats.thread[thread_id].timestamp_errors += timestamp_errors;
-    anic_ctx->thread_stats.thread[thread_id].validation_errors += validation_errors;
+    /* update stats counters */
+    atv->packets += packets;
+    atv->bytes += bytes;
+    atv->packet_errors += packet_errors;
+    atv->flow_errors += flow_errors;
+    StatsAddUI64(atv->tv, atv->capture_kernel_packets, (uint64_t)packets);
+    SC_ATOMIC_ADD(atv->livedev->pkts, packets);
+    StatsSyncCountersIfSignalled(atv->tv);
 
     return 0;
 }
@@ -369,9 +373,6 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
 
         memset (&blkstatus, 0, sizeof(blkstatus));
         uint32_t blkcnt = anic_block_get(anic_ctx->handle, thread_id, ring_id, &blkstatus);
-        if (blkcnt > anic_ctx->thread_stats.thread[thread_id].blkc_max) {
-        	anic_ctx->thread_stats.thread[thread_id].blkc_max = blkcnt;
-        }
         if (blkcnt > 0) {
         	uint32_t block_id = blkstatus.blkid;
             /*patch in the virtual address of the block base */
@@ -401,16 +402,8 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
            	        anic_block_add(anic_ctx->handle, thread_id, block_id, 0, anic_ctx->blocks[block_id].dma_address);
                 }
 	        }
-            /*
-             * update buffer counts to monitor queue lengths of free buffers
-             */
-            uint32_t block_free = anic_block_get_freecount(anic_ctx->handle, 0);
-            if (block_free < anic_ctx->thread_stats.thread[thread_id].blkf_min) {
-        	    anic_ctx->thread_stats.thread[thread_id].blkf_min = block_free;
-            }
        	    usleep(1000);
         }
-       	StatsSyncCountersIfSignalled(tv);
     }
 
     SCReturnInt(TM_ECODE_OK);
@@ -427,37 +420,33 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
 {
     AccoladeThreadVars *atv = (AccoladeThreadVars *) data;
     ANIC_CONTEXT *anic_context = atv->anic_context;
-    /*
-     * Thread 0 signals to print per port stats
-     *  
-     */
-    if (atv->thread_id==0){
+
+    /* on thread 0 only, dump the port stats and set the drops/malfs in the live device */
+    if (atv->thread_id==0) {
+        uint64_t drops = 0L;
+        uint64_t malfs = 0L;
         for (int port=0; port < anic_context->port_count; port++) {
-            struct rx_rmon_counts_s stats;
-            anic_get_rx_rmon_counts (anic_context->handle, port, 0,  &stats);
-
-            double percent = 0;
-            if (stats.rsrc_count > 0) {
-                percent = (((double)stats.rsrc_count)
-                    / (stats.total_pkts + stats.rsrc_count)) * 100;
-            }
-
-            SCLogInfo("port%lu - pkts: %lu; drop: %lu (%5.2f%%); bytes: %lu",
-                 (uint64_t) port, stats.total_pkts,
-                 stats.rsrc_count, percent, stats.total_bytes);
+          struct anic_rx_xge_counts counts;
+          anic_port_get_counts(anic_context->handle, port, 0, &counts);
+          SCLogPerf("(port %u) - Packets %" PRIu64 ", rsrcs %" PRIu64 ", bytes %" PRIu64 ", malfs %" PRIu64 "",
+                    port,
+                    counts.packets,
+                    counts.rsrcs,
+                    counts.bytes,
+                    counts.malfs);
+            drops += counts.rsrcs;  
+            malfs += counts.malfs;  
         }
+        SC_ATOMIC_SET(atv->livedev->drop, drops);
+        SC_ATOMIC_SET(atv->livedev->invalid_checksums, malfs);
     }
-    /*
-     * Print per thread stats
-     */
-    SCLogInfo("thread%lu - pkts: %lu; bytes: %lu",
-                 (uint64_t) atv->thread_id, 
-                 anic_context->thread_stats.thread[atv->thread_id].packets,
-                 anic_context->thread_stats.thread[atv->thread_id].bytes);
-
-    //anic_context->thread_stats.thread[thread_id].packet_errors;
-    //anic_context->thread_stats.thread[thread_id].timestamp_errors;
-    //anic_context->thread_stats.thread[thread_id].validation_errors;    
+    /* thread stats */
+    SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
+              atv->thread_id,
+              atv->packets,
+              atv->bytes,
+              atv->packet_errors,
+              atv->flow_errors);
 }
 
 /**

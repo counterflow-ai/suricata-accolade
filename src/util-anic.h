@@ -114,7 +114,6 @@ typedef struct _ANIC_CONTEXT_
 
   ANIC_MODE ring_mode;
 
-  THREAD_STATS thread_stats;
   uint32_t thread_ring[ANIC_MAX_NUMBER_OF_RINGS];
   BLOCK_MAP blocks[ANIC_BLOCK_MAX_BLOCKS];
   BLOCK_STATUS block_status[ANIC_BLOCK_MAX_BLOCKS];
