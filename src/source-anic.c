@@ -82,16 +82,18 @@ SC_ATOMIC_DECLARE(uint64_t, g_thread_count);
 typedef struct AccoladeThreadVars_ {
     ANIC_CONTEXT *anic_context;
     uint32_t ring_id;
-    int32_t thread_id;
+    uint32_t thread_id;
     uint32_t flow_id;
     uint32_t pad;
     ThreadVars *tv;
     LiveDevice *livedev;
     TmSlot *slot;
+    uint32_t prev_drop;
 
     /* counters */
     uint64_t packets;
     uint64_t bytes;
+    uint64_t drops;
     uint64_t packet_errors;
     uint64_t flow_errors;
     uint16_t capture_kernel_packets;
@@ -181,6 +183,7 @@ TmEcode AccoladeThreadInit(ThreadVars *tv, const void *initdata, void **data)
     atv->livedev = LiveGetDevice("anic");
     atv->thread_id = (SC_ATOMIC_ADD(g_thread_count, 1)-1);
     atv->ring_id = anic_context->thread_ring [atv->thread_id];
+    atv->prev_drop = anic_block_get_ring_dropcount(anic_context->handle, atv->ring_id);
 
     /* basic counters */
     atv->capture_kernel_packets = StatsRegisterCounter("capture.kernel_packets", atv->tv);
@@ -241,8 +244,10 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
 
     uint32_t packets = 0;
     uint32_t bytes = 0;
+    uint32_t drops;
     uint32_t packet_errors = 0;
     uint32_t flow_errors = 0;
+    uint32_t tmp;
     struct anic_descriptor_rx_packet_data *descriptor;
     uint8_t *next_buffer = &blkstatus_p->buf_p[blkstatus_p->firstpkt_offset];
 
@@ -334,10 +339,14 @@ static int AccoladeProcessBlock (uint32_t block_id, AccoladeThreadVars *atv)
     /* update stats counters */
     atv->packets += packets;
     atv->bytes += bytes;
+    tmp = anic_block_get_ring_dropcount(anic_ctx->handle, atv->ring_id);
+    drops = (tmp - atv->prev_drop) & 0x00ffffff;
+    atv->prev_drop = tmp;
+    atv->drops += drops;
     atv->packet_errors += packet_errors;
     atv->flow_errors += flow_errors;
     StatsAddUI64(atv->tv, atv->capture_kernel_packets, (uint64_t)packets);
-    SC_ATOMIC_ADD(atv->livedev->pkts, packets);
+    StatsAddUI64(atv->tv, atv->capture_kernel_drops, (uint64_t)drops);
     StatsSyncCountersIfSignalled(atv->tv);
 
     return 0;
@@ -393,7 +402,7 @@ TmEcode AccoladePacketLoopZC(ThreadVars *tv, void *data, void *slot)
          * and add back to the ANIC pool. Note, that a buffer is consider done when
          * when the reference count is zero (0)
          */
-	        for (int block_id=0; block_id < anic_ctx->max_blocks; block_id++) {
+	        for (uint32_t block_id=0; block_id < anic_ctx->max_blocks; block_id++) {
                 if ((anic_ctx->block_status[block_id].thread_id == thread_id) &&
                     (anic_ctx->block_status[block_id].inuse) &&
         	        (SC_ATOMIC_GET(anic_ctx->block_status[block_id].refcount)==0)) {
@@ -425,7 +434,7 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
     if (atv->thread_id==0) {
         uint64_t drops = 0L;
         uint64_t malfs = 0L;
-        for (int port=0; port < anic_context->port_count; port++) {
+        for (uint32_t port=0; port < anic_context->port_count; port++) {
           struct anic_rx_xge_counts counts;
           anic_port_get_counts(anic_context->handle, port, 0, &counts);
           SCLogPerf("(port %u) - Packets %" PRIu64 ", rsrcs %" PRIu64 ", bytes %" PRIu64 ", malfs %" PRIu64 "",
@@ -441,10 +450,11 @@ void AccoladeThreadExitStats(ThreadVars *tv, void *data)
         SC_ATOMIC_SET(atv->livedev->invalid_checksums, malfs);
     }
     /* thread stats */
-    SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
+    SCLogPerf("(thrd %u) - Packets %" PRIu64 ", bytes %" PRIu64 ", drops %" PRIu64 ", pkt_errors %" PRIu64 ", flw_errors %" PRIu64 "",
               atv->thread_id,
               atv->packets,
               atv->bytes,
+              atv->drops,
               atv->packet_errors,
               atv->flow_errors);
 }

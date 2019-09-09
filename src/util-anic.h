@@ -100,17 +100,15 @@ typedef struct _BLOCK_STATUS_
 typedef struct _ANIC_CONTEXT_
 {
   anic_handle_t handle;
-  int64_t index;
-  int16_t reset;
-  int16_t slice;
-  int32_t ring_count;
-  int32_t port_count;
-  int32_t enable_bypass;
-  int32_t flow_timeout;
-  int32_t thread_count;
-  int64_t max_blocks;
+  uint32_t index;
+  uint32_t ring_count;
+  uint32_t port_count;
+  uint32_t enable_bypass;
+  uint32_t flow_timeout;
+  uint32_t thread_count;
+  uint32_t max_blocks;
+  uint32_t block_limit;
   uint64_t ring_mask;
-
 
   ANIC_MODE ring_mode;
 

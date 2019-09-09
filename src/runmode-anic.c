@@ -55,85 +55,63 @@ static int AccoladeConfigGetThreadCount(void *conf)
 static void *ParseAccoladeConfig(const char *mode)
 {
     ANIC_CONTEXT *anic_context = SCCalloc(1, sizeof(ANIC_CONTEXT));
-    if (unlikely(anic_context == NULL))
-    {
+    if (unlikely(anic_context == NULL)) {
         SCLogError(SC_ERR_MEM_ALLOC, "failed to allocate memory for Accolade device context.");
         return NULL;
     }
     memset(anic_context, 0, sizeof(ANIC_CONTEXT));
 
-    
-    if (ConfGetInt("anic.max_blocks", &anic_context->max_blocks) != 1)
-    {
-        anic_context->max_blocks = ANIC_DEFAULT_BLOCKS;
-    }
+    intmax_t index;
+    if (ConfGetInt("anic.index", &index) == 0)
+        index = 0;
+    anic_context->index = (uint32_t)index;
 
-    if (anic_context->max_blocks > ANIC_MAX_BLOCKS)
-    {
-          SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "max_blocks cannot exceed %i", ANIC_MAX_BLOCKS);
-    }
-
-    if (ConfGetInt("anic.interface", &anic_context->index) != 1)
-    {
-        anic_context->index = 0;
-    }
-
-
-    if (ConfGetBool("anic.enable_bypass", &anic_context->enable_bypass) != 1)
-    {
-        anic_context->enable_bypass = 0;
-    }
-    
-    if (ConfGetInt("anic.flow_timeout", (int64_t *)&anic_context->flow_timeout) != 1)
-    {
-        /* default timeout is 60 seconds for flow (shunting)*/
-        anic_context->flow_timeout = 60;
-    }
-
-    const char *steer_mode = NULL;
-    if (ConfGet("anic.steer_mode", &steer_mode) != 1)
-    {
-        /* default mode */
-        steer_mode = "steerlb";
-    }
-
-    if (strncmp(mode, "single", 6) == 0)
-    {
-        /* all ports merged into one thead */
+    if (strncmp(mode, "single", 6) == 0) {
         anic_context->ring_mode = RING16;
-        SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
-    }
-    else
-    {
-        if (strncmp(steer_mode, "steer0123", 9) == 0)
-        {
-            /* one thread per port */
+    } else {
+        int port_steer;
+        if (ConfGetBool("anic.port-steer", &port_steer) == 0)
+            port_steer = 0;
+        if (port_steer)
             anic_context->ring_mode = PORT;
-            SCLogInfo("ANIC interface:%lu, mode %s:steer0123\n", anic_context->index, mode);
-        }
-        else if (strncmp(steer_mode, "steer16", 7) == 0)
-        {
-            /* all ports merged into one thead */
-            anic_context->ring_mode = RING16;
-            SCLogInfo("ANIC interface:%lu, mode %s:steer16\n", anic_context->index, mode);
-        }
-        else if (strncmp(steer_mode, "steerlb", 7) == 0)
-        {
-            /* load balance mode */
-            anic_context->ring_mode = LOADBALANCE;
-            SCLogInfo("ANIC interface:%lu, mode %s:steerlb\n", anic_context->index, mode);
-        }
         else
-        { // undefined
-            SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "invalid Accolade steer mode");
-            return NULL;
-        }
+            anic_context->ring_mode = LOADBALANCE;
     }
-    
-    anic_context->reset = 1;
 
-    if (anic_configure(anic_context) < 0)
-    {
+    intmax_t lb_rings;
+    if (ConfGetInt("anic.lb-rings", &lb_rings) == 0)
+        lb_rings = 8;
+    if (lb_rings > ANIC_MAX_NUMBER_OF_RINGS) {
+        SCLogWarning(SC_ERR_ACCOLADE_PARSE_CONFIG, "anic.lb-rings cannot exceed %i", ANIC_MAX_NUMBER_OF_RINGS);
+        lb_rings = ANIC_MAX_NUMBER_OF_RINGS;
+    }
+    anic_context->ring_count = (uint32_t)lb_rings;
+
+    intmax_t max_blocks;
+    if (ConfGetInt("anic.max-blocks", &max_blocks) == 0)
+        max_blocks = 0;
+    if (max_blocks > ANIC_MAX_BLOCKS) {
+        SCLogWarning(SC_ERR_ACCOLADE_PARSE_CONFIG, "anic.max-blocks cannot exceed %i", ANIC_MAX_BLOCKS);
+        max_blocks = ANIC_MAX_BLOCKS;
+    }
+    anic_context->max_blocks = (uint32_t)max_blocks;
+
+    int enable_bypass;
+    if (ConfGetBool("anic.enable-bypass", &enable_bypass) == 0)
+        enable_bypass = 0;
+    anic_context->enable_bypass = (uint32_t)enable_bypass;
+
+    intmax_t flow_timeout;
+    if (ConfGetInt("anic.flow-timeout", &flow_timeout) == 0)
+        flow_timeout = 8;
+    anic_context->flow_timeout = (uint32_t)flow_timeout;
+
+    intmax_t block_limit;
+    if (ConfGetInt("anic.block-limit", &block_limit) == 0)
+        block_limit = 0;
+    anic_context->block_limit = (uint32_t)block_limit;
+
+    if (anic_configure(anic_context) < 0) {
         SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "failed to initialize Accolade NIC");
         return NULL;
     }
@@ -181,6 +159,8 @@ int RunModeAccoladeSingle(void)
 
     LiveRegisterDevice("anic");
 
+    LiveDeviceHasNoStats();
+
     ret = RunModeSetLiveCaptureSingle(ParseAccoladeConfig,
                                       AccoladeConfigGetThreadCount,
                                       "AccoladeReceive",
@@ -210,6 +190,8 @@ int RunModeAccoladeAutoFp(void)
 
     LiveRegisterDevice("anic");
 
+    LiveDeviceHasNoStats();
+
     ret = RunModeSetLiveCaptureAutoFp(ParseAccoladeConfig,
                                       AccoladeConfigGetThreadCount,
                                       "AccoladeReceive",
@@ -238,6 +220,8 @@ int RunModeAccoladeWorkers(void)
     TimeModeSetLive();
 
     LiveRegisterDevice("anic");
+
+    LiveDeviceHasNoStats();
 
     ret = RunModeSetLiveCaptureWorkers(ParseAccoladeConfig,
                                        AccoladeConfigGetThreadCount,

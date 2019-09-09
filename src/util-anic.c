@@ -114,6 +114,7 @@ static int anic_map_blocks(ANIC_CONTEXT *ctx)
  *
  * ---------------------------------------------------------------------------------------
  */
+#if 0
 static int anic_cpu_count(void)
 {
 	int numCores;
@@ -144,6 +145,7 @@ static int anic_cpu_count(void)
 #endif
 	return numCores;
 }
+#endif
 /*
  * ---------------------------------------------------------------------------------------
  *
@@ -155,27 +157,24 @@ int anic_configure(ANIC_CONTEXT *ctx)
 	ctx->handle = anic_open("/dev/anic", ctx->index);
 	if (anic_error_code(ctx->handle) != ANIC_ERR_NONE)
 	{
-		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ANIC interace %d : %s\n",
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ANIC interace %d : %s",
 				   (int)ctx->index, anic_error_message(ctx->handle));
 		anic_close(ctx->handle);
 		return -1;
 	}
 
-	if (ctx->reset)
-	{
-		anic_reset_and_restart_pipeline(ctx->handle);
-		SCLogInfo("ANIC reset and restart\n");
-	}
+    anic_reset_and_restart_pipeline(ctx->handle);
+    SCLogInfo("ANIC reset and restart");
 
 	char *product_name = anic_get_product_name(ctx->handle);
-	anic_get_number_of_ports(ctx->handle, &ctx->port_count);
-	SCLogInfo("ANIC %s, ports:%u,  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u\n",
+	anic_get_number_of_ports(ctx->handle, (int32_t *)&ctx->port_count);
+	SCLogInfo("ANIC %s, ports:%u,  firmware: %u.%u.%u at PCIe geographic address: %02x:%02x:%u",
 			  product_name, ctx->port_count, ctx->handle->product_info.major_version, ctx->handle->product_info.minor_version,
 			  ctx->handle->product_info.sub_version, ctx->handle->product_info.pci_bus,
 			  ctx->handle->product_info.pci_slot, ctx->handle->product_info.pci_func);
 	if ((ctx->handle->product_info.major_version & 0xf0) != 0x40)
 	{
-		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "firmware is not block mode DMA\n");
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "firmware is not block mode DMA");
 		anic_close(ctx->handle);
 		return -1;
 	}
@@ -190,6 +189,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		ctx->ring_mask = 0x0000000000010000L;
 		anic_pduproc_steer(ctx->handle, ANIC_STEER16);
 		anic_pduproc_dma_pktseq(ctx->handle, 1);
+	        SCLogInfo("ANIC%u RING16 steering", ctx->index);
 		break;
 
 	case PORT:
@@ -198,12 +198,12 @@ int anic_configure(ANIC_CONTEXT *ctx)
 		ctx->ring_mask |= (1L << ctx->ring_count) - 1;
 		anic_pduproc_steer(ctx->handle, ANIC_STEER0123);
 		anic_pduproc_dma_pktseq(ctx->handle, 1);
+	        SCLogInfo("ANIC%u PORT steering", ctx->index);
 		break;
 
 	case LOADBALANCE:
 	default:
 		/* load balance mode */
-		ctx->ring_count = (anic_cpu_count() / 2);
 		ctx->ring_mask = (0x8000000000000000L) | ((1L << ctx->ring_count) - 1);
 		anic_pduproc_steer(ctx->handle, ANIC_STEERLB);
 		anic_pduproc_dma_pktseq(ctx->handle, 1);
@@ -212,26 +212,28 @@ int anic_configure(ANIC_CONTEXT *ctx)
 			// if large LUT is not supported, fall back to normal LUT
 			if (anic_setup_rings(ctx->handle, ctx->ring_count, 0x01, NULL))
 			{
-				SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "unsupported firmware revision\n");
+				SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "unsupported firmware revision");
 				return -1;
 			}
 		}
 		ctx->ring_count += 1; // ring 63
+	        SCLogInfo("ANIC%u LOADBALANCE steering", ctx->index);
 		break;
 	}
 	if (ctx->ring_count > ANIC_MAX_NUMBER_OF_RINGS)
 	{
-		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ring count exceeded maximum allowed.\n");
+		SCLogError(SC_ERR_ACCOLADE_INIT_FAILED, "ring count exceeded maximum allowed");
 		anic_close(ctx->handle);
 		return -1;
 	}
 	ctx->thread_count = ctx->ring_count;
-
-	// enable packet slicing if necessary
-	if (ctx->slice)
-	{
-		anic_pduproc_slice(ctx->handle, ctx->slice);
-	}
+        if (ctx->max_blocks == 0)
+            ctx->max_blocks = ctx->ring_count * 8;
+        if (ctx->max_blocks > ANIC_MAX_BLOCKS)
+            ctx->max_blocks = ANIC_MAX_BLOCKS;
+        if (ctx->block_limit > 0)
+            anic_block_set_block_limit(ctx->handle, ctx->block_limit);
+	SCLogInfo("ANIC%u, %u rings, %u blocks, %u block_limit", ctx->index, ctx->ring_count, ctx->max_blocks, ctx->block_limit);
 
 	anic_set_ts_disc_mode(ctx->handle, ANIC_TS_DISC_HOST);
 
@@ -274,7 +276,7 @@ int anic_configure(ANIC_CONTEXT *ctx)
 #endif
 
 	/* clear PKIF counters and enable port */
-	for (int port = 0; port < (ctx->port_count); port++)
+	for (uint32_t port = 0; port < (ctx->port_count); port++)
 	{
 		anic_port_get_counts(ctx->handle, port, 1, NULL);
 		anic_port_ena_disa(ctx->handle, port, 1);
