@@ -1814,6 +1814,14 @@ anic:
     # By specifying a completed block limit, we enable thread based drops opposed to unified interface drops.
     #block-limit: 16 
 
+    # Enable ANIC based flow tracking and flow bypass.
+    #enable-bypass: yes
+    
+    # When flow bypass is enabled, set the flow inactivity timeout in seconds.
+    # Defaults to 8 seconds when not specified.
+    # A maximum timout of 63 seconds is supported but long timeouts will lead to excessive flow table utilization.
+    #flow-timeout: 8
+
 
 # Tilera mpipe configuration. for use on Tilera TILE-Gx.
 mpipe:
