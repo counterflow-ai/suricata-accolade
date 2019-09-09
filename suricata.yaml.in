@@ -1793,6 +1793,28 @@ napatech:
     #   a range of streams (e.g. streams: ["0-3"])
     streams: ["0-3"]
 
+
+anic:
+    # Force port oriented steering (only use 4 rings, not recommended).
+    # Using port steering inhibits the lb-rings setting.
+    #port-steer: yes
+
+    # Otherwise, use IP load balancing to rings.
+    # Specify the number of rings to use for IP load balancing.
+    # (defaults to 8 when not specified)
+    #lb-rings: 8
+
+    # Maximum number of blocks to use.
+    # This automatically defaults to (lb-rings * 8), but can be overriden here if needed.
+    # The minimum should be no less than (lb-rings * 2) and be as high as 2047.
+    #max-blocks: 64
+
+    # Completed block limit.
+    # This defaults to 0 (disabled).
+    # By specifying a completed block limit, we enable thread based drops opposed to unified interface drops.
+    #block-limit: 16 
+
+
 # Tilera mpipe configuration. for use on Tilera TILE-Gx.
 mpipe:
 
